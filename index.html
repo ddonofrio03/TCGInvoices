@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TCG Invoicing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --blue: #045494;
+    --blue-deep: #033f70;
+    --ink: #0F1729;
+    --navy: #0A1F3D;
+    --cream: #F2EFE8;
+    --offwhite: #FAFAF7;
+    --white: #ffffff;
+    --slate: #475569;
+    --slate-light: #94a3b8;
+    --accent: #B8D4F0;
+    --accent-2: #7DA8DC;
+    --line: #e3ddd0;
+    --green: #1f7a4d;
+    --amber: #b07a1a;
+    --red: #b03030;
+    --gray: #64748b;
+    --shadow: 0 1px 2px rgba(10,31,61,.06), 0 8px 24px rgba(10,31,61,.06);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { font-family: 'Inter Tight', sans-serif; letter-spacing: -0.01em; }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--slate);
+  }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; }
+  input, select, textarea {
+    font-family: inherit; font-size: 14px; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+    background: var(--white); width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); outline-offset: -1px; }
+  label.fld { display: block; }
+  label.fld > span { display: block; font-size: 12px; font-weight: 600; color: var(--slate); margin-bottom: 5px; }
+
+  /* Layout */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 232px; background: var(--navy); color: #dce6f2; flex-shrink: 0;
+    display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  }
+  .brand { padding: 22px 20px 18px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .brand .mark { font-family: 'Inter Tight'; font-weight: 800; font-size: 22px; color: var(--white); letter-spacing: -.02em; }
+  .brand .mark span { color: var(--accent-2); }
+  .brand .sub { font-family: 'JetBrains Mono'; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-2); margin-top: 4px; }
+  nav.tabs { padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; }
+  nav.tabs button {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    padding: 10px 13px; border-radius: 9px; color: #b9c7da; font-size: 14px; font-weight: 500;
+  }
+  nav.tabs button .ic { width: 17px; height: 17px; opacity: .85; }
+  nav.tabs button:hover { background: rgba(255,255,255,.06); color: #fff; }
+  nav.tabs button.active { background: var(--blue); color: #fff; font-weight: 600; }
+  .sidebar .foot { margin-top: auto; padding: 16px 20px; font-size: 11px; color: #6f83a0; line-height: 1.6; border-top: 1px solid rgba(255,255,255,.08); }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    background: var(--offwhite); border-bottom: 1px solid var(--line);
+    padding: 16px 30px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar h1 { font-size: 21px; font-weight: 700; }
+  .topbar .sb { font-size: 13px; color: var(--slate); margin-top: 1px; }
+  .content { padding: 28px 30px 60px; max-width: 1200px; width: 100%; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px; border-radius: 9px;
+    font-size: 14px; font-weight: 600; background: var(--blue); color: #fff; transition: background .15s;
+  }
+  .btn:hover { background: var(--blue-deep); }
+  .btn.ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .btn.ghost:hover { background: var(--white); border-color: var(--accent-2); }
+  .btn.sm { padding: 6px 11px; font-size: 13px; }
+  .btn.danger { background: transparent; color: var(--red); border: 1px solid #e7c9c9; }
+  .btn.danger:hover { background: #fbeeee; }
+
+  /* Cards / KPIs */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .kpi { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); padding: 17px 18px; box-shadow: var(--shadow); }
+  .kpi .lbl { font-family: 'JetBrains Mono'; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--slate); }
+  .kpi .val { font-family: 'Inter Tight'; font-size: 27px; font-weight: 700; margin-top: 7px; color: var(--ink); }
+  .kpi .val.blue { color: var(--blue); }
+  .kpi .val.red { color: var(--red); }
+  .kpi .val.green { color: var(--green); }
+  .kpi .meta { font-size: 12px; color: var(--gray); margin-top: 3px; }
+
+  .panel { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 22px; }
+  .panel-h { padding: 15px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .panel-h h3 { font-size: 15.5px; font-weight: 700; }
+  .panel-b { padding: 18px 20px; }
+  .grid2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 22px; }
+
+  /* Table */
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.tbl th { text-align: left; font-family: 'JetBrains Mono'; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--slate); padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.tbl td { padding: 12px 14px; border-bottom: 1px solid #f0ece2; vertical-align: middle; }
+  table.tbl tr:last-child td { border-bottom: none; }
+  table.tbl tbody tr:hover { background: #faf8f3; }
+  table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .row-click { cursor: pointer; }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 20px; font-family: 'JetBrains Mono'; letter-spacing: .03em; text-transform: uppercase; }
+  .pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.draft { color: var(--gray); background: #eef0f3; }
+  .pill.sent { color: var(--blue); background: #e6eff7; }
+  .pill.partial { color: var(--amber); background: #fcf3e0; }
+  .pill.paid { color: var(--green); background: #e6f3ec; }
+  .pill.overdue { color: var(--red); background: #fbeaea; }
+
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .toolbar .grow { flex: 1; min-width: 160px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--white); }
+  .seg button { padding: 8px 13px; font-size: 13px; font-weight: 600; color: var(--slate); border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: none; }
+  .seg button.active { background: var(--blue); color: #fff; }
+
+  .empty { text-align: center; padding: 50px 20px; color: var(--gray); }
+  .empty h3 { font-size: 17px; color: var(--ink); margin-bottom: 6px; }
+
+  /* Bar chart */
+  .chart { display: flex; align-items: flex-end; gap: 8px; height: 180px; padding-top: 10px; }
+  .chart .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; height: 100%; justify-content: flex-end; }
+  .chart .bar { width: 100%; max-width: 34px; background: linear-gradient(180deg, var(--accent-2), var(--blue)); border-radius: 5px 5px 0 0; min-height: 2px; transition: height .3s; }
+  .chart .bl { font-size: 10.5px; color: var(--slate); font-family: 'JetBrains Mono'; }
+  .chart .bv { font-size: 10px; color: var(--gray); font-variant-numeric: tabular-nums; }
+
+  /* Modal */
+  .overlay { position: fixed; inset: 0; background: rgba(10,31,61,.45); display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; z-index: 100; overflow-y: auto; }
+  .modal { background: var(--offwhite); border-radius: 14px; width: 100%; max-width: 760px; box-shadow: 0 24px 70px rgba(10,31,61,.3); }
+  .modal-h { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+  .modal-h h2 { font-size: 18px; }
+  .modal-b { padding: 22px 24px; max-height: 70vh; overflow-y: auto; }
+  .modal-f { padding: 16px 24px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .x { font-size: 22px; color: var(--slate); line-height: 1; padding: 4px 8px; border-radius: 6px; }
+  .x:hover { background: var(--line); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-grid .full { grid-column: 1 / -1; }
+
+  /* Line items */
+  .li-row { display: grid; grid-template-columns: 1fr 80px 110px 110px 34px; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .li-head { font-size: 11px; font-weight: 600; color: var(--slate); }
+  .li-row .del { color: var(--red); font-size: 18px; text-align: center; border-radius: 6px; }
+  .li-row .del:hover { background: #fbeaea; }
+  .totals { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .totals .tr { display: flex; gap: 30px; font-size: 14px; min-width: 240px; justify-content: space-between; }
+  .totals .tr.grand { font-family: 'Inter Tight'; font-weight: 800; font-size: 19px; color: var(--blue); border-top: 1px solid var(--line); padding-top: 8px; }
+
+  .pay-list { margin-top: 8px; }
+  .pay-list .pl-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #f3f6fb; border: 1px solid #e1eaf5; border-radius: 8px; margin-bottom: 6px; font-size: 13px; }
+
+  .help { font-size: 12.5px; color: var(--gray); }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  .inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 12px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.3); z-index: 200; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.warn { background: var(--amber); }
+  .toast.err { background: var(--red); }
+
+  .banner { background: #fcf3e0; border: 1px solid #f0dca8; color: #6b5212; padding: 11px 16px; border-radius: 10px; font-size: 13px; margin-bottom: 18px; display: flex; gap: 10px; align-items: flex-start; }
+  .banner b { color: #4a3a0c; }
+
+  /* Mapping table */
+  .map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; align-items: center; }
+  .map-grid .ml { font-size: 13px; font-weight: 600; }
+
+  @media (max-width: 860px) {
+    .sidebar { display: none; }
+    .kpis { grid-template-columns: 1fr 1fr; }
+    .grid2 { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+    .content, .topbar { padding-left: 18px; padding-right: 18px; }
+  }
+
+  /* ===== Print ===== */
+  .print-only { display: none; }
+  @media print {
+    .app { display: none !important; }
+    .print-only { display: block !important; }
+    body { background: #fff; }
+    @page { margin: 18mm; }
+  }
+  #printArea { color: #111; font-family: 'Inter', sans-serif; }
+  #printArea .pi-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid var(--blue); padding-bottom: 18px; margin-bottom: 26px; }
+  #printArea .pi-head .co { font-family: 'Inter Tight'; font-weight: 800; font-size: 26px; color: var(--blue); }
+  #printArea .pi-head .co span { color: var(--ink); }
+  #printArea .pi-head .ci { font-size: 12.5px; color: #444; margin-top: 6px; line-height: 1.6; }
+  #printArea .pi-head .inv-title { text-align: right; }
+  #printArea .pi-head .inv-title h2 { font-family: 'Inter Tight'; font-size: 30px; letter-spacing: .06em; color: var(--ink); }
+  #printArea .pi-head .inv-title .n { font-family: 'JetBrains Mono'; color: var(--slate); margin-top: 4px; }
+  #printArea .pi-meta { display: flex; justify-content: space-between; margin-bottom: 24px; gap: 30px; }
+  #printArea .pi-meta .blk .h { font-family: 'JetBrains Mono'; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--slate); margin-bottom: 4px; }
+  #printArea .pi-meta .blk .v { font-size: 14px; }
+  #printArea table.pt { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  #printArea table.pt th { background: var(--blue); color: #fff; text-align: left; padding: 10px 12px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  #printArea table.pt th.num, #printArea table.pt td.num { text-align: right; }
+  #printArea table.pt td { padding: 10px 12px; border-bottom: 1px solid #e5e5e5; font-size: 13.5px; }
+  #printArea .pt-tot { width: 280px; margin-left: auto; }
+  #printArea .pt-tot .r { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; }
+  #printArea .pt-tot .r.g { font-family: 'Inter Tight'; font-weight: 800; font-size: 18px; color: var(--blue); border-top: 2px solid var(--blue); margin-top: 6px; padding-top: 8px; }
+  #printArea .pt-tot .r.bal { font-weight: 700; }
+  #printArea .pi-foot { margin-top: 40px; border-top: 1px solid #ddd; padding-top: 14px; font-size: 12.5px; color: #555; }
+  #printArea .pi-foot .tag { font-style: italic; color: var(--blue); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+
+<div class="print-only">
+  <div id="printArea"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================================================
+   TCG Invoicing - self-contained vanilla JS app
+   Data source of truth: data/store.json (commit changes to repo)
+   ============================================================ */
+
+const LS_KEY = 'tcg_invoicing_store_v1';
+let store = null;
+let view = 'dashboard';
+let editingInvoice = null;   // working copy in modal
+let importState = null;      // excel import working state
+
+/* ---------- utils ---------- */
+const $ = (sel, el=document) => el.querySelector(sel);
+const uid = () => 'id_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const todayISO = () => new Date().toISOString().slice(0,10);
+const fmtMoney = (n) => {
+  const cur = store?.settings?.currency || 'USD';
+  try { return new Intl.NumberFormat('en-US', { style:'currency', currency:cur }).format(n||0); }
+  catch { return '$' + (Number(n)||0).toFixed(2); }
+};
+const fmtDate = (iso) => {
+  if (!iso) return '\u2014';
+  const d = new Date(iso + (iso.length===10 ? 'T00:00:00' : ''));
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+};
+const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+function toast(msg, kind) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (kind ? ' '+kind : '');
+  clearTimeout(t._t); t._t = setTimeout(()=> t.className = 'toast', 2600);
+}
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------- computed invoice math ---------- */
+function lineTotal(li){ return num(li.quantity) * num(li.rate); }
+function invoiceSubtotal(inv){ return (inv.lineItems||[]).reduce((s,li)=> s+lineTotal(li), 0); }
+function invoiceTotal(inv){
+  const sub = invoiceSubtotal(inv);
+  const disc = num(inv.discount);
+  const taxed = (sub - disc) * (num(inv.taxRate)/100);
+  return Math.max(0, sub - disc + taxed);
+}
+function invoicePaid(inv){
+  return (store.payments||[]).filter(p=> p.invoiceId===inv.id).reduce((s,p)=> s+num(p.amount), 0);
+}
+function invoiceBalance(inv){ return invoiceTotal(inv) - invoicePaid(inv); }
+function invoiceState(inv){
+  const total = invoiceTotal(inv);
+  const paid = invoicePaid(inv);
+  if (total > 0 && paid >= total - 0.005) return 'paid';
+  if (paid > 0.005) return 'partial';
+  if ((inv.status==='sent') && inv.dueDate && inv.dueDate < todayISO()) return 'overdue';
+  return inv.status || 'draft';
+}
+function clientName(id){ const c = (store.clients||[]).find(c=>c.id===id); return c ? c.name : 'Unknown client'; }
+function getClientByName(name){
+  if(!name) return null;
+  return (store.clients||[]).find(c=> c.name.trim().toLowerCase() === String(name).trim().toLowerCase());
+}
+function ensureClient(name){
+  if(!name) return null;
+  let c = getClientByName(name);
+  if(!c){ c = { id: uid(), name: String(name).trim(), email:'', company:'' }; store.clients.push(c); }
+  return c;
+}
+
+/* ---------- persistence ---------- */
+async function loadStore(){
+  // 1) try data/store.json (works on GitHub Pages / any http server)
+  try {
+    const res = await fetch('data/store.json', { cache:'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      store = normalize(json);
+      // cache to LS so edits survive reloads before re-commit
+      const ls = localStorage.getItem(LS_KEY);
+      if (ls) {
+        // prefer local edits if newer flag set
+        const local = JSON.parse(ls);
+        if (local && local.__dirty) { store = normalize(local); return; }
+      }
+      return;
+    }
+  } catch(e){ /* file:// or offline */ }
+  // 2) fall back to localStorage
+  const ls = localStorage.getItem(LS_KEY);
+  if (ls) { store = normalize(JSON.parse(ls)); return; }
+  // 3) empty default
+  store = normalize(null);
+}
+function normalize(j){
+  j = j || {};
+  return {
+    settings: Object.assign({
+      business: { name:'The Casey Group', email:'', phone:'', website:'', addressLines:[], tagline:'' },
+      currency:'USD', invoicePrefix:'TCG-', nextNumber:1001, defaultTaxRate:0, paymentTermsDays:30, notesDefault:''
+    }, j.settings||{}),
+    clients: j.clients || [],
+    invoices: (j.invoices||[]).map(inv => Object.assign({ lineItems:[], taxRate:0, discount:0, status:'draft', notes:'' }, inv)),
+    payments: j.payments || [],
+    __dirty: j.__dirty || false
+  };
+}
+function persistLocal(){
+  store.__dirty = true;
+  localStorage.setItem(LS_KEY, JSON.stringify(store));
+}
+function markClean(){ store.__dirty = false; localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+
+/* ---------- export ---------- */
+function download(filename, text, type='application/json'){
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function exportStore(){
+  const clean = JSON.parse(JSON.stringify(store)); delete clean.__dirty;
+  download('store.json', JSON.stringify(clean, null, 2));
+  markClean();
+  toast('store.json downloaded \u2014 commit it to data/ in your repo');
+}
+function exportInvoicesCSV(){
+  const rows = [['Invoice #','Client','Issue Date','Due Date','Status','Subtotal','Discount','Tax %','Total','Paid','Balance']];
+  (store.invoices||[]).forEach(inv=>{
+    rows.push([inv.number, clientName(inv.clientId), inv.issueDate||'', inv.dueDate||'', invoiceState(inv),
+      invoiceSubtotal(inv).toFixed(2), num(inv.discount).toFixed(2), num(inv.taxRate),
+      invoiceTotal(inv).toFixed(2), invoicePaid(inv).toFixed(2), invoiceBalance(inv).toFixed(2)]);
+  });
+  download('tcg-invoices.csv', rows.map(r=> r.map(csvCell).join(',')).join('\n'), 'text/csv');
+}
+function exportPaymentsCSV(){
+  const rows = [['Date','Invoice #','Client','Amount','Method','Note']];
+  (store.payments||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||'')).forEach(p=>{
+    const inv = (store.invoices||[]).find(i=>i.id===p.invoiceId);
+    rows.push([p.date||'', inv?inv.number:'', inv?clientName(inv.clientId):'', num(p.amount).toFixed(2), p.method||'', p.note||'']);
+  });
+  download('tcg-payments.csv', rows.map(r=> r.map(csvCell).join(',')).join('\n'), 'text/csv');
+}
+function csvCell(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render(){
+  const titles = {
+    dashboard: ['Dashboard', 'Collections, outstanding balances, and recent activity'],
+    invoices:  ['Invoices', 'Create, edit, send, and print invoices'],
+    payments:  ['Payments', 'Every payment recorded across all invoices'],
+    settings:  ['Settings', 'Business details, data import, and export']
+  };
+  const [title, sub] = titles[view];
+  const dirty = store.__dirty;
+  $('#app').innerHTML = `
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">TCG<span>.</span></div>
+        <div class="sub">Invoicing</div>
+      </div>
+      <nav class="tabs">
+        ${tabBtn('dashboard','Dashboard', svgGrid())}
+        ${tabBtn('invoices','Invoices', svgDoc())}
+        ${tabBtn('payments','Payments', svgCash())}
+        ${tabBtn('settings','Settings', svgGear())}
+      </nav>
+      <div class="foot">
+        The Casey Group<br/>${escapeHtml(store.settings.business.email||'')}<br/>
+        <span style="color:var(--accent-2)">Self-contained \u00b7 commit data/store.json</span>
+      </div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <h1>${title}</h1>
+          <div class="sb">${sub}</div>
+        </div>
+        <div class="inline">
+          ${dirty ? `<button class="btn ghost sm" onclick="exportStore()" title="You have unsaved changes">\u25cf Unsaved \u2014 Export store.json</button>` : ''}
+          ${view==='invoices' ? `<button class="btn" onclick="openInvoice()">+ New invoice</button>` : ''}
+          ${view==='payments' ? `<button class="btn" onclick="openPaymentPicker()">+ Record payment</button>` : ''}
+        </div>
+      </div>
+      <div class="content">${renderView()}</div>
+    </div>`;
+}
+function tabBtn(id, label, ic){
+  return `<button class="${view===id?'active':''}" onclick="go('${id}')"><span class="ic">${ic}</span>${label}</button>`;
+}
+function go(v){ view = v; render(); window.scrollTo(0,0); }
+function renderView(){
+  if (view==='dashboard') return renderDashboard();
+  if (view==='invoices')  return renderInvoices();
+  if (view==='payments')  return renderPayments();
+  if (view==='settings')  return renderSettings();
+  return '';
+}
+
+/* ---------- dashboard ---------- */
+function renderDashboard(){
+  const invs = store.invoices||[];
+  const yr = new Date().getFullYear();
+  let collectedYTD=0, outstanding=0, overdue=0, overdueCount=0;
+  (store.payments||[]).forEach(p=>{ if((p.date||'').slice(0,4)==String(yr)) collectedYTD += num(p.amount); });
+  invs.forEach(inv=>{
+    const bal = invoiceBalance(inv); const st = invoiceState(inv);
+    if (st!=='draft') outstanding += Math.max(0,bal);
+    if (st==='overdue'){ overdue += Math.max(0,bal); overdueCount++; }
+  });
+  const totalCollectedAll = (store.payments||[]).reduce((s,p)=> s+num(p.amount),0);
+
+  // monthly collected for current year
+  const months = Array.from({length:12}, (_,i)=>0);
+  (store.payments||[]).forEach(p=>{ const d=p.date||''; if(d.slice(0,4)==String(yr)){ const m=parseInt(d.slice(5,7))-1; if(m>=0&&m<12) months[m]+=num(p.amount); }});
+  const maxM = Math.max(1, ...months);
+  const mLabels = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+  const chart = months.map((v,i)=> `
+    <div class="bar-wrap" title="${escapeHtml(mLabels[i])}: ${fmtMoney(v)}">
+      <div class="bv">${v? (v>=1000? '$'+Math.round(v/1000)+'k' : '$'+Math.round(v)) : ''}</div>
+      <div class="bar" style="height:${Math.round(v/maxM*100)}%"></div>
+      <div class="bl">${mLabels[i]}</div>
+    </div>`).join('');
+
+  // top clients by collected
+  const byClient = {};
+  (store.payments||[]).forEach(p=>{ const inv=invs.find(i=>i.id===p.invoiceId); if(!inv) return; const k=inv.clientId; byClient[k]=(byClient[k]||0)+num(p.amount); });
+  const top = Object.entries(byClient).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  // recent activity (payments + invoices)
+  const recent = [];
+  (store.payments||[]).forEach(p=>{ const inv=invs.find(i=>i.id===p.invoiceId); recent.push({date:p.date, t:'payment', label:`Payment ${fmtMoney(p.amount)} \u00b7 ${inv?escapeHtml(inv.number):'?'}`}); });
+  invs.forEach(inv=> recent.push({date:inv.issueDate, t:'invoice', label:`Invoice ${escapeHtml(inv.number)} \u00b7 ${escapeHtml(clientName(inv.clientId))}`}));
+  recent.sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const recentRows = recent.slice(0,8).map(r=> `<tr><td style="white-space:nowrap;color:var(--slate)">${fmtDate(r.date)}</td><td>${r.label}</td></tr>`).join('') || `<tr><td colspan="2" class="help">No activity yet.</td></tr>`;
+
+  if (!invs.length && !(store.payments||[]).length){
+    return emptyState('No data yet', 'Import your Excel file in Settings, or create your first invoice.',
+      `<button class="btn" onclick="go('settings')">Import Excel</button> <button class="btn ghost" onclick="openInvoice()">New invoice</button>`);
+  }
+
+  return `
+    ${store.__dirty ? dirtyBanner() : ''}
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Collected ${yr}</div><div class="val green">${fmtMoney(collectedYTD)}</div><div class="meta">${fmtMoney(totalCollectedAll)} all-time</div></div>
+      <div class="kpi"><div class="lbl">Outstanding</div><div class="val blue">${fmtMoney(outstanding)}</div><div class="meta">across open invoices</div></div>
+      <div class="kpi"><div class="lbl">Overdue</div><div class="val ${overdue>0?'red':''}">${fmtMoney(overdue)}</div><div class="meta">${overdueCount} invoice${overdueCount===1?'':'s'} past due</div></div>
+      <div class="kpi"><div class="lbl">Invoices</div><div class="val">${invs.length}</div><div class="meta">${(store.clients||[]).length} client${(store.clients||[]).length===1?'':'s'}</div></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-h"><h3>Collected by month \u00b7 ${yr}</h3></div>
+        <div class="panel-b"><div class="chart">${chart}</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h3>Top clients</h3><span class="eyebrow">by collected</span></div>
+        <div class="panel-b">
+          ${top.length ? top.map(([cid,amt])=>`
+            <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f0ece2">
+              <span>${escapeHtml(clientName(cid))}</span><b style="font-variant-numeric:tabular-nums">${fmtMoney(amt)}</b>
+            </div>`).join('') : '<div class="help">No payments recorded yet.</div>'}
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><h3>Recent activity</h3></div>
+      <div class="panel-b" style="padding:0"><table class="tbl"><tbody>${recentRows}</tbody></table></div>
+    </div>`;
+}
+function dirtyBanner(){
+  return `<div class="banner"><span>\u25cf</span><div><b>Unsaved changes.</b> Your edits are cached in this browser. Click <b>Export store.json</b> (top right) and commit the file to <code>data/store.json</code> in your repo to make them permanent.</div></div>`;
+}
+
+/* ---------- invoices ---------- */
+let invFilter = { q:'', status:'all', year:'all' };
+function renderInvoices(){
+  const invs = store.invoices||[];
+  if (!invs.length){
+    return emptyState('No invoices yet', 'Create one, or import your Excel data from Settings.',
+      `<button class="btn" onclick="openInvoice()">+ New invoice</button> <button class="btn ghost" onclick="go('settings')">Import Excel</button>`);
+  }
+  const years = Array.from(new Set(invs.map(i=> (i.issueDate||'').slice(0,4)).filter(Boolean))).sort().reverse();
+  let rows = invs.slice().sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||'') || (b.number||'').localeCompare(a.number||''));
+  if (invFilter.status!=='all') rows = rows.filter(i=> invoiceState(i)===invFilter.status);
+  if (invFilter.year!=='all') rows = rows.filter(i=> (i.issueDate||'').slice(0,4)===invFilter.year);
+  if (invFilter.q){ const q=invFilter.q.toLowerCase(); rows = rows.filter(i=> (i.number||'').toLowerCase().includes(q) || clientName(i.clientId).toLowerCase().includes(q)); }
+
+  const body = rows.map(inv=>{
+    const st = invoiceState(inv);
+    return `<tr class="row-click" onclick="openInvoice('${inv.id}')">
+      <td><b>${escapeHtml(inv.number)}</b></td>
+      <td>${escapeHtml(clientName(inv.clientId))}</td>
+      <td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.issueDate)}</td>
+      <td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.dueDate)}</td>
+      <td><span class="pill ${st}">${st}</span></td>
+      <td class="num">${fmtMoney(invoiceTotal(inv))}</td>
+      <td class="num" style="color:${invoiceBalance(inv)>0.005?'var(--red)':'var(--green)'}">${fmtMoney(invoiceBalance(inv))}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="7" class="help" style="padding:24px">No invoices match these filters.</td></tr>`;
+
+  return `
+    ${store.__dirty ? dirtyBanner() : ''}
+    <div class="toolbar">
+      <div class="grow"><input placeholder="Search invoice # or client\u2026" value="${escapeHtml(invFilter.q)}" oninput="invFilter.q=this.value; refreshInvoiceTable()" /></div>
+      <div class="seg">
+        ${['all','draft','sent','partial','overdue','paid'].map(s=>`<button class="${invFilter.status===s?'active':''}" onclick="invFilter.status='${s}';renderAndStay()">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}
+      </div>
+      <select style="width:auto" onchange="invFilter.year=this.value;renderAndStay()">
+        <option value="all"${invFilter.year==='all'?' selected':''}>All years</option>
+        ${years.map(y=>`<option value="${y}"${invFilter.year===y?' selected':''}>${y}</option>`).join('')}
+      </select>
+    </div>
+    <div class="panel">
+      <div class="panel-b" style="padding:0" id="invTableWrap">
+        <table class="tbl">
+          <thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th>Due</th><th>Status</th><th class="num">Total</th><th class="num">Balance</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+function renderAndStay(){ render(); }
+function refreshInvoiceTable(){
+  // light refresh without losing search focus
+  const invs = store.invoices||[];
+  let rows = invs.slice().sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||''));
+  if (invFilter.status!=='all') rows = rows.filter(i=> invoiceState(i)===invFilter.status);
+  if (invFilter.year!=='all') rows = rows.filter(i=> (i.issueDate||'').slice(0,4)===invFilter.year);
+  if (invFilter.q){ const q=invFilter.q.toLowerCase(); rows = rows.filter(i=> (i.number||'').toLowerCase().includes(q) || clientName(i.clientId).toLowerCase().includes(q)); }
+  const body = rows.map(inv=>{ const st=invoiceState(inv);
+    return `<tr class="row-click" onclick="openInvoice('${inv.id}')"><td><b>${escapeHtml(inv.number)}</b></td><td>${escapeHtml(clientName(inv.clientId))}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.issueDate)}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.dueDate)}</td><td><span class="pill ${st}">${st}</span></td><td class="num">${fmtMoney(invoiceTotal(inv))}</td><td class="num" style="color:${invoiceBalance(inv)>0.005?'var(--red)':'var(--green)'}">${fmtMoney(invoiceBalance(inv))}</td></tr>`;
+  }).join('') || `<tr><td colspan="7" class="help" style="padding:24px">No invoices match these filters.</td></tr>`;
+  const wrap = $('#invTableWrap tbody'); if (wrap) wrap.innerHTML = body;
+}
+
+/* ---------- invoice modal ---------- */
+function openInvoice(id){
+  if (id){ editingInvoice = JSON.parse(JSON.stringify(store.invoices.find(i=>i.id===id))); }
+  else {
+    const prefix = store.settings.invoicePrefix||'';
+    const n = store.settings.nextNumber||1001;
+    editingInvoice = { id:uid(), number: prefix+n, clientId:'', clientNameTmp:'', issueDate:todayISO(),
+      dueDate: addDays(todayISO(), store.settings.paymentTermsDays||30), status:'draft',
+      lineItems:[{description:'', quantity:1, rate:0}], taxRate:num(store.settings.defaultTaxRate), discount:0,
+      notes: store.settings.notesDefault||'', __isNew:true };
+  }
+  renderInvoiceModal();
+}
+function addDays(iso, days){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+num(days)); return d.toISOString().slice(0,10); }
+function renderInvoiceModal(){
+  const inv = editingInvoice;
+  const existing = !inv.__isNew;
+  const clientOpts = (store.clients||[]).map(c=>`<option value="${c.id}"${inv.clientId===c.id?' selected':''}>${escapeHtml(c.name)}</option>`).join('');
+  const li = inv.lineItems.map((l,idx)=>`
+    <div class="li-row">
+      <input placeholder="Description" value="${escapeHtml(l.description)}" oninput="liEdit(${idx},'description',this.value)" />
+      <input type="number" step="0.01" value="${l.quantity}" oninput="liEdit(${idx},'quantity',this.value)" />
+      <input type="number" step="0.01" value="${l.rate}" oninput="liEdit(${idx},'rate',this.value)" />
+      <div class="num" style="font-variant-numeric:tabular-nums;align-self:center">${fmtMoney(lineTotal(l))}</div>
+      <button class="del" title="Remove" onclick="liDel(${idx})">\u00d7</button>
+    </div>`).join('');
+
+  const sub = invoiceSubtotal(inv);
+  const disc = num(inv.discount);
+  const tax = (sub-disc)*(num(inv.taxRate)/100);
+  const total = invoiceTotal(inv);
+  const paid = existing ? invoicePaid(inv) : 0;
+  const bal = total - paid;
+
+  const payments = existing ? (store.payments||[]).filter(p=>p.invoiceId===inv.id) : [];
+  const payHtml = payments.length ? `<div class="pay-list">${payments.map(p=>`
+      <div class="pl-row"><span>${fmtDate(p.date)} \u00b7 <b>${fmtMoney(p.amount)}</b> \u00b7 ${escapeHtml(p.method||'')}${p.note?' \u00b7 '+escapeHtml(p.note):''}</span>
+      <button class="del" onclick="delPayment('${p.id}')">\u00d7</button></div>`).join('')}</div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.className='overlay'; overlay.id='modalOverlay';
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-h">
+        <h2>${existing?'Edit invoice '+escapeHtml(inv.number):'New invoice'}</h2>
+        <button class="x" onclick="closeModal()">\u00d7</button>
+      </div>
+      <div class="modal-b">
+        <div class="form-grid">
+          <label class="fld"><span>Invoice number</span><input value="${escapeHtml(inv.number)}" oninput="editingInvoice.number=this.value" /></label>
+          <label class="fld"><span>Client</span>
+            <select onchange="invClientSelect(this.value)">
+              <option value="">\u2014 Select client \u2014</option>
+              ${clientOpts}
+              <option value="__new">+ Add new client\u2026</option>
+            </select>
+          </label>
+          <label class="fld" id="newClientWrap" style="${inv.clientId?'display:none':''}"><span>New client name</span><input id="newClientInput" placeholder="Client name" value="${escapeHtml(inv.clientNameTmp||'')}" oninput="editingInvoice.clientNameTmp=this.value" /></label>
+          <label class="fld"><span>Status</span>
+            <select onchange="editingInvoice.status=this.value">
+              <option value="draft"${inv.status==='draft'?' selected':''}>Draft</option>
+              <option value="sent"${inv.status==='sent'?' selected':''}>Sent</option>
+            </select>
+          </label>
+          <label class="fld"><span>Issue date</span><input type="date" value="${inv.issueDate||''}" oninput="editingInvoice.issueDate=this.value" /></label>
+          <label class="fld"><span>Due date</span><input type="date" value="${inv.dueDate||''}" oninput="editingInvoice.dueDate=this.value" /></label>
+        </div>
+
+        <div style="margin-top:20px">
+          <div class="li-row li-head"><div>Description</div><div>Qty</div><div>Rate</div><div class="num">Amount</div><div></div></div>
+          ${li}
+          <button class="btn ghost sm" style="margin-top:6px" onclick="liAdd()">+ Add line</button>
+        </div>
+
+        <div class="form-grid" style="margin-top:18px">
+          <label class="fld"><span>Discount (${escapeHtml(store.settings.currency||'USD')})</span><input type="number" step="0.01" value="${inv.discount}" oninput="editingInvoice.discount=this.value; renderInvoiceModalTotals()" /></label>
+          <label class="fld"><span>Tax rate (%)</span><input type="number" step="0.01" value="${inv.taxRate}" oninput="editingInvoice.taxRate=this.value; renderInvoiceModalTotals()" /></label>
+          <label class="fld full"><span>Notes</span><textarea rows="2" oninput="editingInvoice.notes=this.value">${escapeHtml(inv.notes||'')}</textarea></label>
+        </div>
+
+        <div class="totals" id="modalTotals">
+          <div class="tr"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div>
+          <div class="tr"><span>Discount</span><span>\u2212 ${fmtMoney(disc)}</span></div>
+          <div class="tr"><span>Tax (${num(inv.taxRate)}%)</span><span>${fmtMoney(tax)}</span></div>
+          <div class="tr grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+          ${existing?`<div class="tr"><span>Paid</span><span style="color:var(--green)">${fmtMoney(paid)}</span></div><div class="tr" style="font-weight:700"><span>Balance</span><span style="color:${bal>0.005?'var(--red)':'var(--green)'}">${fmtMoney(bal)}</span></div>`:''}
+        </div>
+
+        ${existing?`<div class="panel" style="margin-top:20px;box-shadow:none">
+          <div class="panel-h"><h3 style="font-size:14px">Payments</h3><button class="btn ghost sm" onclick="openPaymentForm('${inv.id}')">+ Record payment</button></div>
+          <div class="panel-b">${payHtml || '<div class="help">No payments recorded.</div>'}</div>
+        </div>`:''}
+      </div>
+      <div class="modal-f">
+        <div>${existing?`<button class="btn danger sm" onclick="deleteInvoice('${inv.id}')">Delete invoice</button>`:''}</div>
+        <div class="inline">
+          ${existing?`<button class="btn ghost" onclick="printInvoice('${inv.id}')">Print / PDF</button>`:''}
+          <button class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="saveInvoice()">${existing?'Save changes':'Create invoice'}</button>
+        </div>
+      </div>
+    </div>`;
+  closeModal();
+  document.body.appendChild(overlay);
+}
+function renderInvoiceModalTotals(){
+  const inv = editingInvoice;
+  const sub = invoiceSubtotal(inv), disc=num(inv.discount), tax=(sub-disc)*(num(inv.taxRate)/100), total=invoiceTotal(inv);
+  const el = $('#modalTotals'); if(!el) return;
+  const existing = !inv.__isNew; const paid = existing?invoicePaid(inv):0; const bal=total-paid;
+  el.innerHTML = `<div class="tr"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div>
+    <div class="tr"><span>Discount</span><span>\u2212 ${fmtMoney(disc)}</span></div>
+    <div class="tr"><span>Tax (${num(inv.taxRate)}%)</span><span>${fmtMoney(tax)}</span></div>
+    <div class="tr grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+    ${existing?`<div class="tr"><span>Paid</span><span style="color:var(--green)">${fmtMoney(paid)}</span></div><div class="tr" style="font-weight:700"><span>Balance</span><span style="color:${bal>0.005?'var(--red)':'var(--green)'}">${fmtMoney(bal)}</span></div>`:''}`;
+}
+function liEdit(i,k,v){ editingInvoice.lineItems[i][k]=v; if(k!=='description') renderInvoiceModalTotals();
+  // update the amount cell live
+  const rows=document.querySelectorAll('.li-row'); /* header offset 1 */ }
+function liAdd(){ editingInvoice.lineItems.push({description:'',quantity:1,rate:0}); renderInvoiceModal(); }
+function liDel(i){ editingInvoice.lineItems.splice(i,1); if(!editingInvoice.lineItems.length) editingInvoice.lineItems.push({description:'',quantity:1,rate:0}); renderInvoiceModal(); }
+function invClientSelect(val){
+  if (val==='__new'){ editingInvoice.clientId=''; const w=$('#newClientWrap'); if(w) w.style.display='block'; const ni=$('#newClientInput'); if(ni) ni.focus(); return; }
+  editingInvoice.clientId = val; editingInvoice.clientNameTmp='';
+  const w=$('#newClientWrap'); if(w) w.style.display = val?'none':'block';
+}
+function saveInvoice(){
+  const inv = editingInvoice;
+  if (!inv.clientId && (inv.clientNameTmp||'').trim()){ const c=ensureClient(inv.clientNameTmp.trim()); inv.clientId=c.id; }
+  if (!inv.clientId){ toast('Pick or add a client first', 'warn'); return; }
+  if (!inv.number || !inv.number.trim()){ toast('Invoice number required','warn'); return; }
+  delete inv.clientNameTmp;
+  const wasNew = inv.__isNew; delete inv.__isNew;
+  const idx = store.invoices.findIndex(i=>i.id===inv.id);
+  if (idx>=0) store.invoices[idx]=inv; else store.invoices.push(inv);
+  if (wasNew){
+    // bump next number if it matches pattern prefix+N
+    const prefix = store.settings.invoicePrefix||'';
+    if (inv.number.startsWith(prefix)){ const n=parseInt(inv.number.slice(prefix.length)); if(!isNaN(n) && n>=store.settings.nextNumber) store.settings.nextNumber=n+1; }
+  }
+  persistLocal(); closeModal(); render();
+  toast(wasNew?'Invoice created':'Invoice saved');
+}
+function deleteInvoice(id){
+  if (!confirm('Delete this invoice? Linked payments will also be removed.')) return;
+  store.invoices = store.invoices.filter(i=>i.id!==id);
+  store.payments = store.payments.filter(p=>p.invoiceId!==id);
+  persistLocal(); closeModal(); render(); toast('Invoice deleted');
+}
+function closeModal(){ const o=$('#modalOverlay'); if(o) o.remove(); }
+
+/* ---------- payments ---------- */
+let payFilter = { q:'', year:'all' };
+function renderPayments(){
+  const pays = (store.payments||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  if (!pays.length){
+    return emptyState('No payments yet', 'Record a payment against an invoice to start tracking collections.',
+      `<button class="btn" onclick="openPaymentPicker()">+ Record payment</button>`);
+  }
+  const years = Array.from(new Set(pays.map(p=>(p.date||'').slice(0,4)).filter(Boolean))).sort().reverse();
+  let rows = pays;
+  if (payFilter.year!=='all') rows = rows.filter(p=>(p.date||'').slice(0,4)===payFilter.year);
+  if (payFilter.q){ const q=payFilter.q.toLowerCase(); rows=rows.filter(p=>{ const inv=store.invoices.find(i=>i.id===p.invoiceId); return (inv&&(inv.number.toLowerCase().includes(q)||clientName(inv.clientId).toLowerCase().includes(q)))||(p.method||'').toLowerCase().includes(q); }); }
+  const yr = new Date().getFullYear();
+  const ytd = pays.filter(p=>(p.date||'').slice(0,4)==String(yr)).reduce((s,p)=>s+num(p.amount),0);
+  const allTime = pays.reduce((s,p)=>s+num(p.amount),0);
+
+  const body = rows.map(p=>{ const inv=store.invoices.find(i=>i.id===p.invoiceId);
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--slate)">${fmtDate(p.date)}</td>
+      <td>${inv?`<b class="row-click" onclick="openInvoice('${inv.id}')" style="color:var(--blue)">${escapeHtml(inv.number)}</b>`:'<span class="help">(deleted)</span>'}</td>
+      <td>${inv?escapeHtml(clientName(inv.clientId)):'\u2014'}</td>
+      <td>${escapeHtml(p.method||'')}</td>
+      <td class="help">${escapeHtml(p.note||'')}</td>
+      <td class="num"><b>${fmtMoney(p.amount)}</b></td>
+      <td><button class="del" style="color:var(--red);font-size:17px" onclick="delPayment('${p.id}')">\u00d7</button></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="7" class="help" style="padding:24px">No payments match.</td></tr>`;
+
+  return `
+    ${store.__dirty ? dirtyBanner() : ''}
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi"><div class="lbl">Collected ${yr}</div><div class="val green">${fmtMoney(ytd)}</div></div>
+      <div class="kpi"><div class="lbl">All-time collected</div><div class="val blue">${fmtMoney(allTime)}</div></div>
+      <div class="kpi"><div class="lbl">Payments logged</div><div class="val">${pays.length}</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="grow"><input placeholder="Search invoice, client, method\u2026" value="${escapeHtml(payFilter.q)}" oninput="payFilter.q=this.value;renderAndStay()" /></div>
+      <select style="width:auto" onchange="payFilter.year=this.value;renderAndStay()">
+        <option value="all"${payFilter.year==='all'?' selected':''}>All years</option>
+        ${years.map(y=>`<option value="${y}"${payFilter.year===y?' selected':''}>${y}</option>`).join('')}
+      </select>
+    </div>
+    <div class="panel"><div class="panel-b" style="padding:0">
+      <table class="tbl">
+        <thead><tr><th>Date</th><th>Invoice</th><th>Client</th><th>Method</th><th>Note</th><th class="num">Amount</th><th></th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div></div>`;
+}
+function openPaymentPicker(){
+  const open = (store.invoices||[]).filter(i=> invoiceBalance(i)>0.005).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''));
+  if (!open.length){ toast('No invoices with an open balance', 'warn'); return; }
+  const opts = open.map(i=>`<option value="${i.id}">${escapeHtml(i.number)} \u00b7 ${escapeHtml(clientName(i.clientId))} \u00b7 bal ${fmtMoney(invoiceBalance(i))}</option>`).join('');
+  const overlay=document.createElement('div'); overlay.className='overlay'; overlay.id='modalOverlay';
+  overlay.onclick=(e)=>{if(e.target===overlay)closeModal();};
+  overlay.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Record payment</h2><button class="x" onclick="closeModal()">\u00d7</button></div>
+    <div class="modal-b"><label class="fld"><span>Apply to invoice</span><select id="ppSel">${opts}</select></label></div>
+    <div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="openPaymentForm($('#ppSel').value)">Continue</button></div></div></div>`;
+  closeModal(); document.body.appendChild(overlay);
+}
+function openPaymentForm(invoiceId){
+  const inv = store.invoices.find(i=>i.id===invoiceId); if(!inv){toast('Invoice not found','err');return;}
+  const bal = invoiceBalance(inv);
+  const overlay=document.createElement('div'); overlay.className='overlay'; overlay.id='modalOverlay2'; overlay.style.zIndex=110;
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove();};
+  overlay.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Payment \u00b7 ${escapeHtml(inv.number)}</h2><button class="x" onclick="this.closest('.overlay').remove()">\u00d7</button></div>
+    <div class="modal-b">
+      <p class="help" style="margin-bottom:14px">${escapeHtml(clientName(inv.clientId))} \u00b7 Balance ${fmtMoney(bal)}</p>
+      <div class="form-grid">
+        <label class="fld"><span>Date</span><input type="date" id="pfDate" value="${todayISO()}" /></label>
+        <label class="fld"><span>Amount</span><input type="number" step="0.01" id="pfAmt" value="${bal>0?bal.toFixed(2):''}" /></label>
+        <label class="fld"><span>Method</span><select id="pfMethod"><option>Check</option><option>ACH / transfer</option><option>Credit card</option><option>Cash</option><option>Wire</option><option>Other</option></select></label>
+        <label class="fld"><span>Note (optional)</span><input id="pfNote" placeholder="e.g. check #1043" /></label>
+      </div>
+    </div>
+    <div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="savePayment('${inv.id}')">Save payment</button></div></div></div>`;
+  document.body.appendChild(overlay);
+}
+function savePayment(invoiceId){
+  const amt = num($('#pfAmt').value);
+  if (amt<=0){ toast('Enter an amount','warn'); return; }
+  store.payments.push({ id:uid(), invoiceId, date:$('#pfDate').value||todayISO(), amount:amt, method:$('#pfMethod').value, note:$('#pfNote').value||'' });
+  persistLocal();
+  const o2=$('#modalOverlay2'); if(o2)o2.remove();
+  if ($('#modalOverlay')){ renderInvoiceModal(); } // refresh invoice modal if open
+  render(); toast('Payment recorded');
+}
+function delPayment(id){
+  if(!confirm('Delete this payment?')) return;
+  store.payments = store.payments.filter(p=>p.id!==id); persistLocal();
+  if ($('#modalOverlay') && editingInvoice){ renderInvoiceModal(); }
+  render(); toast('Payment deleted');
+}
+
+/* ---------- settings ---------- */
+function renderSettings(){
+  const b = store.settings.business;
+  return `
+    ${store.__dirty ? dirtyBanner() : ''}
+    <div class="stack" style="max-width:760px">
+      <div class="panel">
+        <div class="panel-h"><h3>Business details</h3></div>
+        <div class="panel-b">
+          <div class="form-grid">
+            <label class="fld"><span>Business name</span><input value="${escapeHtml(b.name||'')}" oninput="setB('name',this.value)" /></label>
+            <label class="fld"><span>Email</span><input value="${escapeHtml(b.email||'')}" oninput="setB('email',this.value)" /></label>
+            <label class="fld"><span>Phone</span><input value="${escapeHtml(b.phone||'')}" oninput="setB('phone',this.value)" /></label>
+            <label class="fld"><span>Website</span><input value="${escapeHtml(b.website||'')}" oninput="setB('website',this.value)" /></label>
+            <label class="fld full"><span>Address lines (one per line)</span><textarea rows="2" oninput="setB('addressLines',this.value.split('\\n'))">${escapeHtml((b.addressLines||[]).join('\n'))}</textarea></label>
+            <label class="fld full"><span>Tagline / invoice footer</span><input value="${escapeHtml(b.tagline||'')}" oninput="setB('tagline',this.value)" /></label>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h3>Invoice defaults</h3></div>
+        <div class="panel-b"><div class="form-grid">
+          <label class="fld"><span>Currency (ISO code)</span><input value="${escapeHtml(store.settings.currency||'USD')}" oninput="store.settings.currency=this.value.toUpperCase();persistLocal()" /></label>
+          <label class="fld"><span>Invoice prefix</span><input value="${escapeHtml(store.settings.invoicePrefix||'')}" oninput="store.settings.invoicePrefix=this.value;persistLocal()" /></label>
+          <label class="fld"><span>Next invoice number</span><input type="number" value="${store.settings.nextNumber||1001}" oninput="store.settings.nextNumber=parseInt(this.value)||1001;persistLocal()" /></label>
+          <label class="fld"><span>Default tax rate (%)</span><input type="number" step="0.01" value="${store.settings.defaultTaxRate||0}" oninput="store.settings.defaultTaxRate=num(this.value);persistLocal()" /></label>
+          <label class="fld"><span>Payment terms (days)</span><input type="number" value="${store.settings.paymentTermsDays||30}" oninput="store.settings.paymentTermsDays=parseInt(this.value)||30;persistLocal()" /></label>
+          <label class="fld"><span>Default invoice notes</span><input value="${escapeHtml(store.settings.notesDefault||'')}" oninput="store.settings.notesDefault=this.value;persistLocal()" /></label>
+        </div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><h3>Import from Excel</h3><span class="eyebrow">.xlsx / .xls / .csv</span></div>
+        <div class="panel-b">
+          <p class="help" style="margin-bottom:12px">Upload your TCG Excel workbook. You'll map your columns to invoice fields on the next screen, so it works no matter what your headers are called. One row per invoice (or per invoice line, if you split them).</p>
+          <input type="file" id="xlsxFile" accept=".xlsx,.xls,.csv" onchange="handleExcel(this.files[0])" style="padding:8px" />
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><h3>Backup &amp; export</h3></div>
+        <div class="panel-b">
+          <p class="help" style="margin-bottom:14px">This app is self-contained. The source of truth is <code>data/store.json</code> in your repo. After making changes, export and commit it.</p>
+          <div class="inline">
+            <button class="btn" onclick="exportStore()">Export store.json</button>
+            <button class="btn ghost" onclick="exportInvoicesCSV()">Export invoices CSV</button>
+            <button class="btn ghost" onclick="exportPaymentsCSV()">Export payments CSV</button>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:18px 0" />
+          <p class="help" style="margin-bottom:10px">Load a <code>store.json</code> from disk (replaces current data in this browser):</p>
+          <input type="file" id="jsonFile" accept=".json" onchange="handleJSON(this.files[0])" style="padding:8px;max-width:340px" />
+        </div>
+      </div>
+
+      <div class="panel" style="box-shadow:none;border-color:#e7c9c9">
+        <div class="panel-h"><h3 style="color:var(--red)">Danger zone</h3></div>
+        <div class="panel-b"><button class="btn danger" onclick="wipeAll()">Clear all data in this browser</button>
+        <p class="help" style="margin-top:8px">This only clears the local cache. Your committed <code>data/store.json</code> in the repo is untouched until you overwrite it.</p></div>
+      </div>
+    </div>`;
+}
+function setB(k,v){ store.settings.business[k]=v; persistLocal(); }
+function handleJSON(file){ if(!file) return; const r=new FileReader(); r.onload=()=>{ try{ store=normalize(JSON.parse(r.result)); persistLocal(); render(); toast('Loaded store.json'); }catch(e){ toast('Invalid JSON file','err'); } }; r.readAsText(file); }
+function wipeAll(){ if(!confirm('Clear all locally cached data? Your repo data/store.json is not affected.')) return; localStorage.removeItem(LS_KEY); location.reload(); }
+
+/* ---------- Excel import with column mapping ---------- */
+function handleExcel(file){
+  if(!file) return;
+  const r = new FileReader();
+  r.onload = (e)=>{
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
+      const sheets = wb.SheetNames;
+      importState = { wb, sheets, sheet: sheets[0], rows:null, headers:null, map:{} };
+      loadSheet(sheets[0]);
+      renderImportModal();
+    } catch(err){ console.error(err); toast('Could not read that file','err'); }
+  };
+  r.readAsArrayBuffer(file);
+}
+function loadSheet(name){
+  const ws = importState.wb.Sheets[name];
+  const json = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:false });
+  // find first non-empty row as header
+  let hi = 0; while(hi<json.length && json[hi].every(c=>String(c).trim()==='')) hi++;
+  const headers = (json[hi]||[]).map(h=>String(h).trim());
+  const rows = json.slice(hi+1).filter(r=> r.some(c=>String(c).trim()!=='')).map(r=>{
+    const o={}; headers.forEach((h,i)=> o[h]= r[i]); return o;
+  });
+  importState.sheet = name; importState.headers = headers; importState.rows = rows;
+  importState.map = autoMap(headers);
+}
+function autoMap(headers){
+  const want = {
+    number:   ['invoice','invoice #','invoice number','number','inv','inv #','invoice no','no'],
+    client:   ['client','customer','customer name','client name','company','bill to','account'],
+    issueDate:['date','invoice date','issue date','issued','created'],
+    dueDate:  ['due','due date','date due'],
+    amount:   ['total','amount','invoice total','grand total','amount due','value'],
+    paid:     ['paid','amount paid','payment','payments','paid amount','received'],
+    status:   ['status','state'],
+    description:['description','memo','notes','item','service','details','line item']
+  };
+  const map={}; const lc = headers.map(h=>h.toLowerCase());
+  Object.entries(want).forEach(([field, names])=>{
+    let idx = -1;
+    for (const n of names){ idx = lc.indexOf(n); if(idx>=0) break; }
+    if (idx<0){ for (let i=0;i<lc.length;i++){ if(names.some(n=> lc[i].includes(n))){ idx=i; break; } } }
+    if (idx>=0) map[field]=headers[idx];
+  });
+  return map;
+}
+function renderImportModal(){
+  const fields = [
+    ['number','Invoice number', true],
+    ['client','Client / customer', true],
+    ['issueDate','Issue date', false],
+    ['dueDate','Due date', false],
+    ['amount','Invoice total', true],
+    ['paid','Amount already paid', false],
+    ['status','Status', false],
+    ['description','Description / memo', false]
+  ];
+  const headerOpts = (sel)=> `<option value="">\u2014 ignore \u2014</option>` + importState.headers.map(h=>`<option value="${escapeHtml(h)}"${importState.map[sel]===h?' selected':''}>${escapeHtml(h)}</option>`).join('');
+  const sheetOpts = importState.sheets.map(s=>`<option value="${escapeHtml(s)}"${importState.sheet===s?' selected':''}>${escapeHtml(s)}</option>`).join('');
+  const preview = buildImportPreview();
+
+  const overlay=document.createElement('div'); overlay.className='overlay'; overlay.id='importOverlay';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove();};
+  overlay.innerHTML = `<div class="modal" style="max-width:820px">
+    <div class="modal-h"><h2>Map your Excel columns</h2><button class="x" onclick="this.closest('.overlay').remove()">\u00d7</button></div>
+    <div class="modal-b">
+      <div class="inline" style="margin-bottom:16px">
+        <label class="fld" style="max-width:260px"><span>Sheet</span><select onchange="loadSheet(this.value);renderImportModal()">${sheetOpts}</select></label>
+        <div class="help" style="align-self:flex-end;padding-bottom:10px">${importState.rows.length} data row${importState.rows.length===1?'':'s'} detected</div>
+      </div>
+      <div class="map-grid">
+        ${fields.map(([f,label,req])=>`<div class="ml">${label}${req?' <span style="color:var(--red)">*</span>':''}</div><select onchange="importState.map['${f}']=this.value;renderImportPreview()">${headerOpts(f)}</select>`).join('')}
+      </div>
+      <div class="banner" style="margin-top:18px"><span>\u2139</span><div>If you map <b>Amount already paid</b>, a matching payment is created and the invoice is marked paid/partial automatically. Dates are parsed flexibly. Invoice numbers that already exist will be <b>skipped</b> (no duplicates).</div></div>
+      <h4 style="margin:14px 0 8px;font-size:13px">Preview <span class="help">(first 5 rows)</span></h4>
+      <div id="importPreview" style="overflow-x:auto">${preview}</div>
+    </div>
+    <div class="modal-f"><span class="help">Existing data is kept; rows are added.</span>
+      <div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button>
+      <button class="btn" onclick="runImport()">Import ${importState.rows.length} row${importState.rows.length===1?'':'s'}</button></div></div>
+  </div>`;
+  const ex=$('#importOverlay'); if(ex)ex.remove(); document.body.appendChild(overlay);
+}
+function renderImportPreview(){ const el=$('#importPreview'); if(el) el.innerHTML=buildImportPreview(); }
+function buildImportPreview(){
+  const m=importState.map;
+  const rows = importState.rows.slice(0,5).map(r=>{
+    const total = parseMoney(r[m.amount]);
+    const paid = m.paid? parseMoney(r[m.paid]) : 0;
+    return `<tr>
+      <td>${escapeHtml(r[m.number]||'')}</td>
+      <td>${escapeHtml(r[m.client]||'')}</td>
+      <td>${escapeHtml(parseDateLoose(r[m.issueDate])||'')}</td>
+      <td class="num">${total?fmtMoney(total):''}</td>
+      <td class="num">${m.paid?(paid?fmtMoney(paid):''):'\u2014'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="help">No rows.</td></tr>';
+  return `<table class="tbl"><thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th class="num">Total</th><th class="num">Paid</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function parseMoney(v){ if(v==null||v==='') return 0; if(typeof v==='number') return v; const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
+function parseDateLoose(v){
+  if (v==null||v==='') return '';
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  // excel serial number
+  if (typeof v==='number'){ const d=new Date(Math.round((v-25569)*86400*1000)); if(!isNaN(d)) return d.toISOString().slice(0,10); }
+  const s=String(v).trim();
+  const d=new Date(s); if(!isNaN(d)) return d.toISOString().slice(0,10);
+  return '';
+}
+function runImport(){
+  const m=importState.map;
+  if (!m.number || !m.client || !m.amount){ toast('Map invoice #, client, and total first','warn'); return; }
+  let added=0, skipped=0, pays=0;
+  importState.rows.forEach(r=>{
+    const numv = String(r[m.number]||'').trim();
+    if (!numv){ skipped++; return; }
+    if (store.invoices.some(i=> (i.number||'').trim().toLowerCase()===numv.toLowerCase())){ skipped++; return; }
+    const c = ensureClient(r[m.client]);
+    const issue = parseDateLoose(r[m.issueDate]) || '';
+    const due = parseDateLoose(r[m.dueDate]) || (issue? addDays(issue, store.settings.paymentTermsDays||30) : '');
+    const total = parseMoney(r[m.amount]);
+    const desc = m.description? String(r[m.description]||'') : 'Services';
+    let status = 'sent';
+    if (m.status){ const s=String(r[m.status]||'').toLowerCase(); if(s.includes('draft'))status='draft'; else if(s.includes('paid'))status='sent'; else if(s.includes('sent'))status='sent'; }
+    const inv = { id:uid(), number:numv, clientId:c?c.id:'', issueDate:issue, dueDate:due, status,
+      lineItems:[{ description:desc||'Services', quantity:1, rate:total }], taxRate:0, discount:0, notes:'' };
+    store.invoices.push(inv); added++;
+    if (m.paid){ const paid=parseMoney(r[m.paid]); if(paid>0){ store.payments.push({ id:uid(), invoiceId:inv.id, date: issue||todayISO(), amount:paid, method:'Imported', note:'Imported from Excel' }); pays++; } }
+    // bump next number
+    const prefix=store.settings.invoicePrefix||'';
+    if (numv.startsWith(prefix)){ const n=parseInt(numv.slice(prefix.length)); if(!isNaN(n)&&n>=store.settings.nextNumber) store.settings.nextNumber=n+1; }
+  });
+  persistLocal();
+  const o=$('#importOverlay'); if(o)o.remove();
+  render();
+  toast(`Imported ${added} invoice${added===1?'':'s'}${pays?`, ${pays} payment${pays===1?'':'s'}`:''}${skipped?`, skipped ${skipped}`:''}`);
+}
+
+/* ---------- print ---------- */
+function printInvoice(id){
+  const inv = store.invoices.find(i=>i.id===id); if(!inv) return;
+  const c = (store.clients||[]).find(x=>x.id===inv.clientId)||{name:'',email:'',company:''};
+  const b = store.settings.business;
+  const sub=invoiceSubtotal(inv), disc=num(inv.discount), tax=(sub-disc)*(num(inv.taxRate)/100), total=invoiceTotal(inv), paid=invoicePaid(inv), bal=total-paid;
+  const rows = inv.lineItems.map(l=>`<tr><td>${escapeHtml(l.description)}</td><td class="num">${num(l.quantity)}</td><td class="num">${fmtMoney(l.rate)}</td><td class="num">${fmtMoney(lineTotal(l))}</td></tr>`).join('');
+  $('#printArea').innerHTML = `
+    <div class="pi-head">
+      <div><div class="co">The Casey<span> Group</span></div>
+      <div class="ci">${(b.addressLines||[]).map(escapeHtml).join('<br/>')}${b.addressLines&&b.addressLines.length?'<br/>':''}${escapeHtml(b.email||'')}${b.phone?' \u00b7 '+escapeHtml(b.phone):''}${b.website?'<br/>'+escapeHtml(b.website):''}</div></div>
+      <div class="inv-title"><h2>INVOICE</h2><div class="n">${escapeHtml(inv.number)}</div></div>
+    </div>
+    <div class="pi-meta">
+      <div class="blk"><div class="h">Bill to</div><div class="v"><b>${escapeHtml(c.name||'')}</b>${c.company?'<br/>'+escapeHtml(c.company):''}${c.email?'<br/>'+escapeHtml(c.email):''}</div></div>
+      <div class="blk" style="text-align:right"><div class="h">Issued</div><div class="v">${fmtDate(inv.issueDate)}</div><div class="h" style="margin-top:10px">Due</div><div class="v">${fmtDate(inv.dueDate)}</div></div>
+    </div>
+    <table class="pt"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="pt-tot">
+      <div class="r"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div>
+      ${disc?`<div class="r"><span>Discount</span><span>\u2212 ${fmtMoney(disc)}</span></div>`:''}
+      ${num(inv.taxRate)?`<div class="r"><span>Tax (${num(inv.taxRate)}%)</span><span>${fmtMoney(tax)}</span></div>`:''}
+      <div class="r g"><span>Total</span><span>${fmtMoney(total)}</span></div>
+      ${paid?`<div class="r"><span>Paid</span><span>\u2212 ${fmtMoney(paid)}</span></div><div class="r bal"><span>Balance due</span><span>${fmtMoney(bal)}</span></div>`:''}
+    </div>
+    <div class="pi-foot">${escapeHtml(inv.notes||'')}<div class="tag">${escapeHtml(b.tagline||'')}</div></div>`;
+  setTimeout(()=> window.print(), 60);
+}
+
+/* ---------- misc ---------- */
+function emptyState(title, msg, actions){
+  return `<div class="panel"><div class="empty"><h3>${title}</h3><p style="margin-bottom:18px">${msg}</p><div class="inline" style="justify-content:center">${actions}</div></div></div>`;
+}
+/* icons */
+function svgGrid(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';}
+function svgDoc(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>';}
+function svgCash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>';}
+function svgGear(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';}
+
+/* ---------- boot ---------- */
+(async function(){
+  await loadStore();
+  render();
+})();
+</script>
+</body>
+</html>
