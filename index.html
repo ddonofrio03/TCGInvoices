@@ -6,7 +6,7 @@
 <title>TCG Invoicing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -128,8 +128,7 @@
   #printArea .co{font-family:'Inter Tight';font-weight:800;font-size:26px;color:var(--blue)}
   #printArea .co span{color:var(--ink)}
   #printArea .pi-title{text-align:right}
-  #printArea .pi-title h2{font-family:'Inter Tight';font-weight:400;font-size:40px;letter-spacing:.01em;color:#222;line-height:1}
-  #printArea .pi-title .sub{color:#888;font-size:14px;margin-top:4px}
+  #printArea .pi-title h2{font-family:'Inter Tight','Inter',sans-serif;font-weight:500;font-size:40px;letter-spacing:.01em;color:#222;line-height:1}
   #printArea .pi-biz{text-align:right;font-size:13px;color:#333;line-height:1.55;margin-bottom:26px}
   #printArea .pi-biz .bn{font-weight:700;color:#111}
   #printArea .pi-mid{display:flex;justify-content:space-between;gap:40px;margin-bottom:24px}
@@ -626,7 +625,7 @@ function buildPrintArea(inv){
   const rows=inv.lineItems.map(l=>`<tr><td><div class="it-title">${escapeHtml(l.title||'')}</div>${l.detail?`<div class="it-detail">${escapeHtml(l.detail)}</div>`:''}</td><td class="num">${num(l.quantity)}</td><td class="num">${fmtMoney(l.rate)}</td><td class="num">${fmtMoney(lineTotal(l))}</td></tr>`).join('');
   const bizLines=(b.addressLines||[]).map(escapeHtml).join('<br/>');
   $('#printArea').innerHTML=`
-    <div class="pi-top">${logoBlock()}<div class="pi-title"><h2>INVOICE</h2><div class="sub">${escapeHtml(b.name||'')}</div></div></div>
+    <div class="pi-top">${logoBlock()}<div class="pi-title"><h2>INVOICE</h2></div></div>
     <div class="pi-biz"><span class="bn">${escapeHtml(b.name||'')}</span>${bizLines?'<br/>'+bizLines:''}${(b.phone||b.website)?'<br/><br/>':''}${b.phone?escapeHtml(b.phone):''}${b.website?'<br/>'+escapeHtml(b.website):''}</div>
     <div class="pi-mid">
       <div class="bill"><div class="h">Bill To</div><div class="cn">${escapeHtml(c.name||'')}</div>${c.contactName?escapeHtml(c.contactName)+'<br/>':''}${(c.addressLines||[]).map(escapeHtml).join('<br/>')}${(c.addressLines&&c.addressLines.length)?'<br/>':''}${c.email?'<div style="margin-top:6px">'+escapeHtml(c.email)+'</div>':''}</div>
