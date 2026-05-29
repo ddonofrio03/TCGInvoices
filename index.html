@@ -9,7 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{
     --blue:#045494; --blue-deep:#033f70; --ink:#0F1729; --navy:#0A1F3D;
@@ -122,7 +121,7 @@
   @media (max-width:860px){.sidebar{display:none}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.content,.topbar{padding-left:18px;padding-right:18px}}
   /* print */
   .print-only{display:none}
-  @media print{.app{display:none!important}.print-only{display:block!important}body{background:#fff}@page{margin:16mm}}
+  @media print{.app{display:none!important}.print-only{display:block!important}body{background:#fff}@page{size:letter;margin:16mm}}
   #printArea{color:#1a1a1a;font-family:'Inter',sans-serif;font-size:14px}
   #printArea .pi-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
   #printArea .pi-logo{max-height:66px;max-width:300px;object-fit:contain}
@@ -139,6 +138,9 @@
   #printArea .pi-mid .meta{min-width:300px}
   #printArea .pi-mid .meta .mrow{display:flex;justify-content:space-between;gap:24px;padding:2px 0;font-size:13.5px}
   #printArea .pi-mid .meta .mrow .k{color:#555;font-weight:600;text-align:right;flex:1}
+  #printArea .pi-mid .meta .mrow.invno{font-size:18px;padding:6px 0 8px;border-bottom:1px solid #eee;margin-bottom:4px}
+  #printArea .pi-mid .meta .mrow.invno .k{color:#333}
+  #printArea .pi-mid .meta .mrow.invno .v{font-weight:800;color:#0F1729;letter-spacing:.005em}
   #printArea .pi-mid .meta .mrow.ad{background:#f1f1f1;padding:7px 10px;margin-top:6px;border-radius:4px;font-weight:700;font-size:14.5px}
   #printArea table.pt{width:100%;border-collapse:collapse;margin-bottom:18px}
   #printArea table.pt th{background:#045494;color:#fff;text-align:left;padding:10px 14px;font-size:12px;font-weight:600}
@@ -394,7 +396,7 @@ function renderInvoiceModal(){
       ${existing?`<div class="panel" style="margin-top:20px;box-shadow:none"><div class="panel-h"><h3 style="font-size:14px">Payments</h3><button class="btn ghost sm" onclick="openPaymentForm('${inv.id}')">+ Record payment</button></div><div class="panel-b">${payHtml||'<div class="help">No payments recorded.</div>'}</div></div>`:''}
     </div>
     <div class="modal-f"><div>${existing?`<button class="btn danger sm" onclick="deleteInvoice('${inv.id}')">Delete</button>`:''}</div>
-      <div class="inline">${existing?`<button class="btn ghost" onclick="downloadPdf('${inv.id}')">↓ Download PDF</button><button class="btn ghost" onclick="printInvoice('${inv.id}')">Print</button>`:''}<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveInvoice()">${existing?'Save changes':'Create invoice'}</button></div></div>
+      <div class="inline">${existing?`<button class="btn ghost" onclick="downloadPdf('${inv.id}')">↓ Print / Save as PDF</button>`:''}<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveInvoice()">${existing?'Save changes':'Create invoice'}</button></div></div>
   </div>`;
   closeModal();document.body.appendChild(ov);
 }
@@ -629,7 +631,7 @@ function buildPrintArea(inv){
     <div class="pi-mid">
       <div class="bill"><div class="h">Bill To</div><div class="cn">${escapeHtml(c.name||'')}</div>${c.contactName?escapeHtml(c.contactName)+'<br/>':''}${(c.addressLines||[]).map(escapeHtml).join('<br/>')}${(c.addressLines&&c.addressLines.length)?'<br/>':''}${c.email?'<div style="margin-top:6px">'+escapeHtml(c.email)+'</div>':''}</div>
       <div class="meta">
-        <div class="mrow"><span class="k">Invoice Number:</span><span>${escapeHtml(inv.number)}</span></div>
+        <div class="mrow invno"><span class="k">Invoice Number:</span><span class="v">${escapeHtml(inv.number)}</span></div>
         <div class="mrow"><span class="k">Invoice Date:</span><span>${fmtDate(inv.issueDate)}</span></div>
         <div class="mrow"><span class="k">Payment Due:</span><span>${fmtDate(inv.dueDate)}</span></div>
         <div class="mrow ad"><span class="k">Amount Due (USD):</span><span>${fmtMoney(bal)}</span></div>
@@ -645,38 +647,25 @@ function buildPrintArea(inv){
     </div>
     ${inv.notes?`<div class="pi-foot">${escapeHtml(inv.notes)}</div>`:''}`;
 }
-function printInvoice(id){
-  const inv=store.invoices.find(i=>i.id===id);if(!inv)return;
+// PDF generation = browser print dialog → pick "Save as PDF" as destination.
+// The print stylesheet (#printArea + @media print) is the source of truth, so
+// the saved PDF is pixel-identical to the on-screen print preview.
+function downloadPdf(id){
+  const inv=store.invoices.find(i=>i.id===id);
+  if(!inv){toast('Invoice not found','err');return;}
+  // Set the suggested filename via document title — most browsers use this
+  // as the default Save-as-PDF filename.
+  const originalTitle=document.title;
+  document.title=`Invoice-${(inv.number||'invoice').replace(/[^\w\-]/g,'_')}`;
   buildPrintArea(inv);
+  // Restore the title once the print dialog is dismissed (focus returns to window).
+  const restore=()=>{document.title=originalTitle;window.removeEventListener('focus',restore);};
+  window.addEventListener('focus',restore);
   setTimeout(()=>window.print(),60);
 }
-async function downloadPdf(id){
-  const inv=store.invoices.find(i=>i.id===id);if(!inv){toast('Invoice not found','err');return;}
-  buildPrintArea(inv);
-  const ph=document.querySelector('.print-only');
-  const el=document.getElementById('printArea');
-  const originalStyle=ph.getAttribute('style')||'';
-  // Size the wrap so #printArea is exactly the PDF's printable width:
-  // Letter 215.9mm − 14mm margins each side = 187.9mm usable ≈ 710px @ 96dpi.
-  // Global *{box-sizing:border-box} means inner content = wrap width − padding*2.
-  // Wrap = 710 + 0 padding → #printArea is 710px. No windowWidth override (it
-  // confuses html2canvas when the source is positioned off-screen).
-  ph.setAttribute('style',"display:block;position:fixed;left:-99999px;top:0;width:710px;padding:0;background:#fff;z-index:-1;font-family:'Inter',sans-serif");
-  toast('Generating PDF…');
-  try{
-    // Fonts must be loaded before snapshot or headers render in fallback serif.
-    if(document.fonts&&document.fonts.ready)await document.fonts.ready;
-    await html2pdf().set({
-      margin:[14,14,14,14],
-      filename:`Invoice-${(inv.number||'invoice').replace(/[^\w\-]/g,'_')}.pdf`,
-      image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
-      jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}
-    }).from(el).save();
-    toast('PDF downloaded');
-  }catch(e){console.error(e);toast('PDF failed: '+e.message,'err');}
-  finally{ph.setAttribute('style',originalStyle);}
-}
+// printInvoice is now an alias for downloadPdf — same dialog handles both
+// "physical printer" and "Save as PDF" destinations.
+const printInvoice=downloadPdf;
 
 /* ===== icons ===== */
 function svgGrid(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';}
