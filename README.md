@@ -6,7 +6,10 @@ Built to replace Wave. Your data lives in this repo, under your control.
 
 ## What it does
 
-- Create, edit, send, and print invoices (print to PDF from the browser)
+- Create, edit, send, and print invoices, styled to match your Wave layout (print to PDF from the browser)
+- Saved clients: enter company, contact, and email once; they auto-fill on every invoice (Clients tab)
+- Two-line items: a bold title plus a detail line (for example Professional Fee / RenUSA Fee)
+- Optional logo on the printed invoice, stored inside store.json so it travels with the repo
 - Track multiple payments per invoice, with date, amount, method, and note
 - Auto-computes status: draft, sent, partial, overdue, paid
 - Dashboard: collected by month, outstanding, overdue, top clients, recent activity
@@ -25,6 +28,10 @@ This pattern keeps the app fully static and self-contained. There is no backend 
 ```
 Edit in app  ->  Export store.json  ->  Commit to data/store.json  ->  Done
 ```
+
+## Adding your logo
+
+In the app go to Settings, Invoice logo, and upload a PNG or JPG. It is auto-scaled and saved inside store.json, so after you Export and commit store.json the logo travels with the repo and shows on every printed invoice. No separate image file to manage.
 
 ## First-time setup
 
@@ -67,7 +74,7 @@ Tip: one row per invoice is the simplest layout. If your sheet has one row per l
     "notesDefault": ""
   },
   "clients": [
-    { "id": "id_abc", "name": "Client Name", "email": "", "company": "" }
+    { "id": "id_abc", "name": "RenUSA", "contactName": "Ben Kelahan", "email": "ben@renusa.org", "addressLines": [] }
   ],
   "invoices": [
     {
@@ -77,7 +84,7 @@ Tip: one row per invoice is the simplest layout. If your sheet has one row per l
       "issueDate": "2025-03-01",
       "dueDate": "2025-03-31",
       "status": "sent",
-      "lineItems": [ { "description": "Strategic communications retainer", "quantity": 1, "rate": 5000 } ],
+      "lineItems": [ { "title": "Professional Fee", "detail": "RenUSA Fee", "quantity": 1, "rate": 26750 } ],
       "taxRate": 0,
       "discount": 0,
       "notes": ""
