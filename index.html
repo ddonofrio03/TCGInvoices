@@ -656,21 +656,21 @@ async function downloadPdf(id){
   const ph=document.querySelector('.print-only');
   const el=document.getElementById('printArea');
   const originalStyle=ph.getAttribute('style')||'';
-  // Source must be narrower than the PDF's printable area so html2pdf's 96-dpi → mm
-  // conversion lands inside the page. Letter is 215.9mm wide; with 14mm side margins
-  // the usable area is 187.9mm = ~710px @ 96dpi. We use 700px for a tiny safety margin.
-  const SRC_PX=700;
-  ph.setAttribute('style',`display:block;position:fixed;left:-99999px;top:0;width:${SRC_PX}px;padding:0;box-sizing:border-box;background:#fff;z-index:-1;font-family:'Inter',sans-serif`);
+  // Size the wrap so #printArea is exactly the PDF's printable width:
+  // Letter 215.9mm − 14mm margins each side = 187.9mm usable ≈ 710px @ 96dpi.
+  // Global *{box-sizing:border-box} means inner content = wrap width − padding*2.
+  // Wrap = 710 + 0 padding → #printArea is 710px. No windowWidth override (it
+  // confuses html2canvas when the source is positioned off-screen).
+  ph.setAttribute('style',"display:block;position:fixed;left:-99999px;top:0;width:710px;padding:0;background:#fff;z-index:-1;font-family:'Inter',sans-serif");
   toast('Generating PDF…');
   try{
-    // Web fonts must be loaded before html2canvas snapshots, otherwise the headers
-    // render in the fallback serif.
+    // Fonts must be loaded before snapshot or headers render in fallback serif.
     if(document.fonts&&document.fonts.ready)await document.fonts.ready;
     await html2pdf().set({
       margin:[14,14,14,14],
       filename:`Invoice-${(inv.number||'invoice').replace(/[^\w\-]/g,'_')}.pdf`,
       image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',windowWidth:SRC_PX},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
       jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}
     }).from(el).save();
     toast('PDF downloaded');
