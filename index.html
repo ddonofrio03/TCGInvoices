@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{
     --blue:#045494; --blue-deep:#033f70; --ink:#0F1729; --navy:#0A1F3D;
@@ -113,6 +115,10 @@
   .banner b{color:#4a3a0c}
   .map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;align-items:center}
   .map-grid .ml{font-size:13px;font-weight:600}
+  .login-wrap{min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--cream)}
+  .login-card{background:var(--white);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:28px;max-width:380px;width:100%}
+  .login-card h2{font-size:22px;margin-bottom:4px}
+  .login-card .sub{font-size:13px;color:var(--slate);margin-bottom:22px}
   @media (max-width:860px){.sidebar{display:none}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.content,.topbar{padding-left:18px;padding-right:18px}}
   /* print */
   .print-only{display:none}
@@ -135,7 +141,7 @@
   #printArea .pi-mid .meta .mrow .k{color:#555;font-weight:600;text-align:right;flex:1}
   #printArea .pi-mid .meta .mrow.ad{background:#f1f1f1;padding:7px 10px;margin-top:6px;border-radius:4px;font-weight:700;font-size:14.5px}
   #printArea table.pt{width:100%;border-collapse:collapse;margin-bottom:18px}
-  #printArea table.pt th{background:var(--blue);color:#fff;text-align:left;padding:10px 14px;font-size:12px;font-weight:600}
+  #printArea table.pt th{background:#045494;color:#fff;text-align:left;padding:10px 14px;font-size:12px;font-weight:600}
   #printArea table.pt th.num,#printArea table.pt td.num{text-align:right}
   #printArea table.pt td{padding:12px 14px;border-bottom:1px solid #e8e8e8;font-size:13.5px;vertical-align:top}
   #printArea table.pt .it-title{font-weight:700;color:#111}
@@ -152,19 +158,24 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const LS_KEY='tcg_invoicing_store_v1';
+/* ===== Supabase wiring ===== */
+const SUPABASE_URL='https://kjltyavevgacqhahejdc.supabase.co';
+const SUPABASE_KEY='sb_publishable_CsASjkFGBRyo9ZzPBqRQhg_5NOrd3X5';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
 let store=null, view='dashboard', editingInvoice=null, editingClient=null, importState=null;
 
+/* ===== utilities ===== */
 const $=(s,el=document)=>el.querySelector(s);
 const uid=()=>'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
 const todayISO=()=>new Date().toISOString().slice(0,10);
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const fmtMoney=n=>{const c=store?.settings?.currency||'USD';try{return new Intl.NumberFormat('en-US',{style:'currency',currency:c}).format(n||0);}catch{return '$'+(Number(n)||0).toFixed(2);}};
-const fmtDate=iso=>{if(!iso)return '\u2014';const d=new Date(iso+(iso.length===10?'T00:00:00':''));if(isNaN(d))return iso;return d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});};
-function toast(m,k){const t=$('#toast');t.textContent=m;t.className='toast show'+(k?' '+k:'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',2600);}
+const fmtDate=iso=>{if(!iso)return '—';const d=new Date(iso+(iso.length===10?'T00:00:00':''));if(isNaN(d))return iso;return d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});};
+function toast(m,k){const t=$('#toast');if(!t)return;t.textContent=m;t.className='toast show'+(k?' '+k:'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',2600);}
 function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-/* math */
+/* ===== math ===== */
 function lineTotal(li){return num(li.quantity)*num(li.rate);}
 function invoiceSubtotal(inv){return (inv.lineItems||[]).reduce((s,li)=>s+lineTotal(li),0);}
 function invoiceTotal(inv){const sub=invoiceSubtotal(inv),disc=num(inv.discount);return Math.max(0,sub-disc+(sub-disc)*(num(inv.taxRate)/100));}
@@ -174,38 +185,73 @@ function invoiceState(inv){const t=invoiceTotal(inv),p=invoicePaid(inv);if(t>0&&
 function clientById(id){return (store.clients||[]).find(c=>c.id===id)||null;}
 function clientName(id){const c=clientById(id);return c?c.name:'Unknown client';}
 function getClientByName(name){if(!name)return null;return (store.clients||[]).find(c=>c.name.trim().toLowerCase()===String(name).trim().toLowerCase());}
-function ensureClient(name){if(!name)return null;let c=getClientByName(name);if(!c){c={id:uid(),name:String(name).trim(),contactName:'',email:'',addressLines:[]};store.clients.push(c);}return c;}
 
-/* persistence */
+/* ===== DB <-> app mappers ===== */
+function defaultSettings(){return {business:{name:'The Casey Group',email:'',phone:'',website:'',addressLines:[],tagline:'',logo:''},currency:'USD',invoicePrefix:'2026-',nextNumber:1,defaultTaxRate:0,paymentTermsDays:30,notesDefault:''};}
+function fromDBClient(r){return {id:r.id,name:r.name||'',contactName:r.contact_name||'',email:r.email||'',addressLines:r.address_lines||[]};}
+function toDBClient(o){return {id:o.id,name:o.name,contact_name:o.contactName||'',email:o.email||'',address_lines:o.addressLines||[]};}
+function fromDBInvoice(r){return {id:r.id,number:r.number||'',clientId:r.client_id||'',issueDate:r.issue_date||'',dueDate:r.due_date||'',status:r.status||'draft',lineItems:r.line_items||[],taxRate:Number(r.tax_rate)||0,discount:Number(r.discount)||0,notes:r.notes||''};}
+function toDBInvoice(o){return {id:o.id,number:o.number,client_id:o.clientId||null,issue_date:o.issueDate||null,due_date:o.dueDate||null,status:o.status||'draft',line_items:o.lineItems||[],tax_rate:num(o.taxRate),discount:num(o.discount),notes:o.notes||''};}
+function fromDBPayment(r){return {id:r.id,invoiceId:r.invoice_id,date:r.date||'',amount:Number(r.amount)||0,method:r.method||'',note:r.note||''};}
+function toDBPayment(o){return {id:o.id,invoice_id:o.invoiceId,date:o.date||null,amount:num(o.amount),method:o.method||'',note:o.note||''};}
+
+/* ===== load + persist ===== */
 async function loadStore(){
-  try{const res=await fetch('data/store.json',{cache:'no-store'});if(res.ok){const j=await res.json();store=normalize(j);const ls=localStorage.getItem(LS_KEY);if(ls){const local=JSON.parse(ls);if(local&&local.__dirty){store=normalize(local);return;}}return;}}catch(e){}
-  const ls=localStorage.getItem(LS_KEY);if(ls){store=normalize(JSON.parse(ls));return;}
-  store=normalize(null);
+  const [c,i,p,s]=await Promise.all([
+    sb.from('clients').select('*'),
+    sb.from('invoices').select('*'),
+    sb.from('payments').select('*'),
+    sb.from('settings').select('data').eq('id',1).maybeSingle()
+  ]);
+  for(const r of [c,i,p,s]){if(r.error)throw r.error;}
+  const def=defaultSettings();
+  const settings=Object.assign({},def,s.data?.data||{});
+  settings.business=Object.assign({},def.business,(s.data?.data?.business)||{});
+  store={settings,clients:(c.data||[]).map(fromDBClient),invoices:(i.data||[]).map(fromDBInvoice),payments:(p.data||[]).map(fromDBPayment)};
 }
-function normalize(j){
-  j=j||{};
-  const biz=Object.assign({name:'The Casey Group',email:'ddonofrio@thecaseygroup.us',phone:'703-981-6034',website:'thecaseygroup.us',addressLines:['42821 Forest Spring Dr.','Leesburg, Virginia 20176','United States'],tagline:'',logo:''},(j.settings&&j.settings.business)||{});
-  return {
-    settings:Object.assign({business:biz,currency:'USD',invoicePrefix:'2026-',nextNumber:1,defaultTaxRate:0,paymentTermsDays:30,notesDefault:''},(()=>{const s=Object.assign({},j.settings||{});delete s.business;return s;})()),
-    clients:(j.clients||[]).map(c=>Object.assign({contactName:'',email:'',addressLines:[]},c, c.company&&!c.contactName?{contactName:c.company}:{})),
-    invoices:(j.invoices||[]).map(inv=>{const o=Object.assign({lineItems:[],taxRate:0,discount:0,status:'draft',notes:''},inv);o.lineItems=(o.lineItems||[]).map(li=>({title:li.title!=null?li.title:(li.description||''),detail:li.detail||'',quantity:li.quantity!=null?li.quantity:1,rate:li.rate!=null?li.rate:0}));return o;}),
-    payments:j.payments||[],
-    __dirty:j.__dirty||false
-  };
+
+let _settingsTimer=null;
+function persistSettings(){
+  clearTimeout(_settingsTimer);
+  _settingsTimer=setTimeout(async ()=>{
+    const {error}=await sb.from('settings').upsert({id:1,data:store.settings});
+    if(error){console.error(error);toast('Settings save failed: '+error.message,'err');}
+  },400);
 }
-function persistLocal(){store.__dirty=true;localStorage.setItem(LS_KEY,JSON.stringify(store));}
-function markClean(){store.__dirty=false;localStorage.setItem(LS_KEY,JSON.stringify(store));}
+async function dbUpsertInvoice(inv){const {error}=await sb.from('invoices').upsert(toDBInvoice(inv));if(error)throw error;}
+async function dbDeleteInvoice(id){const {error}=await sb.from('invoices').delete().eq('id',id);if(error)throw error;}
+async function dbUpsertClient(c){const {error}=await sb.from('clients').upsert(toDBClient(c));if(error)throw error;}
+async function dbDeleteClient(id){const {error}=await sb.from('clients').delete().eq('id',id);if(error)throw error;}
+async function dbUpsertPayment(p){const {error}=await sb.from('payments').upsert(toDBPayment(p));if(error)throw error;}
+async function dbDeletePayment(id){const {error}=await sb.from('payments').delete().eq('id',id);if(error)throw error;}
 
-/* export */
-function download(fn,txt,type='application/json'){const b=new Blob([txt],{type});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}
-function exportStore(){const c=JSON.parse(JSON.stringify(store));delete c.__dirty;download('store.json',JSON.stringify(c,null,2));markClean();toast('store.json downloaded \u2014 commit it to data/ in your repo');}
-function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
-function exportInvoicesCSV(){const rows=[['Invoice #','Client','Issue Date','Due Date','Status','Subtotal','Discount','Tax %','Total','Paid','Balance']];(store.invoices||[]).forEach(inv=>{rows.push([inv.number,clientName(inv.clientId),inv.issueDate||'',inv.dueDate||'',invoiceState(inv),invoiceSubtotal(inv).toFixed(2),num(inv.discount).toFixed(2),num(inv.taxRate),invoiceTotal(inv).toFixed(2),invoicePaid(inv).toFixed(2),invoiceBalance(inv).toFixed(2)]);});download('tcg-invoices.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');}
-function exportPaymentsCSV(){const rows=[['Date','Invoice #','Client','Amount','Method','Note']];(store.payments||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(p=>{const inv=(store.invoices||[]).find(i=>i.id===p.invoiceId);rows.push([p.date||'',inv?inv.number:'',inv?clientName(inv.clientId):'',num(p.amount).toFixed(2),p.method||'',p.note||'']);});download('tcg-payments.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');}
+/* ===== auth ===== */
+function renderLogin(msg){
+  $('#app').innerHTML=`<div class="login-wrap"><div class="login-card">
+    <h2>TCG Invoicing</h2><div class="sub">Sign in to your invoices.</div>
+    <div class="stack">
+      <label class="fld"><span>Email</span><input id="loginEmail" type="email" value="ddonofrio@thecaseygroup.us" autocomplete="username" /></label>
+      <label class="fld"><span>Password</span><input id="loginPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" /></label>
+      ${msg?`<p style="color:var(--red);font-size:13px;margin:0">${escapeHtml(msg)}</p>`:''}
+      <button class="btn" onclick="doLogin()" style="justify-content:center">Sign in</button>
+    </div>
+  </div></div>`;
+  setTimeout(()=>{const el=$('#loginPass');if(el)el.focus();},20);
+}
+async function doLogin(){
+  const email=$('#loginEmail').value.trim();
+  const password=$('#loginPass').value;
+  if(!email||!password){renderLogin('Enter email and password');return;}
+  const btn=document.querySelector('.login-card .btn');if(btn){btn.textContent='Signing in…';btn.disabled=true;}
+  const {error}=await sb.auth.signInWithPassword({email,password});
+  if(error){renderLogin(error.message);return;}
+  await boot();
+}
+async function signOut(){await sb.auth.signOut();location.reload();}
 
-/* render shell */
+/* ===== render shell ===== */
 function render(){
-  const titles={dashboard:['Dashboard','Collections, outstanding balances, and recent activity'],invoices:['Invoices','Create, edit, send, and print invoices'],clients:['Clients','Saved client details, auto-filled on every invoice'],payments:['Payments','Every payment recorded across all invoices'],settings:['Settings','Business details, logo, import, and export']};
+  const titles={dashboard:['Dashboard','Collections, outstanding balances, and recent activity'],invoices:['Invoices','Create, edit, send, and download invoices'],clients:['Clients','Saved client details, auto-filled on every invoice'],payments:['Payments','Every payment recorded across all invoices'],settings:['Settings','Business details, logo, import, and export']};
   const [title,sub]=titles[view];
   $('#app').innerHTML=`
   <aside class="sidebar">
@@ -217,13 +263,12 @@ function render(){
       ${tabBtn('payments','Payments',svgCash())}
       ${tabBtn('settings','Settings',svgGear())}
     </nav>
-    <div class="foot">${escapeHtml(store.settings.business.name||'The Casey Group')}<br/>${escapeHtml(store.settings.business.email||'')}<br/><span style="color:var(--accent-2)">Self-contained \u00b7 commit data/store.json</span></div>
+    <div class="foot">${escapeHtml(store.settings.business.name||'The Casey Group')}<br/>${escapeHtml(store.settings.business.email||'')}<br/><span style="color:var(--accent-2)">Synced to Supabase</span></div>
   </aside>
   <div class="main">
     <div class="topbar">
       <div><h1>${title}</h1><div class="sb">${sub}</div></div>
       <div class="inline">
-        ${store.__dirty?`<button class="btn ghost sm" onclick="exportStore()" title="Unsaved changes">\u25cf Unsaved \u2014 Export store.json</button>`:''}
         ${view==='invoices'?`<button class="btn" onclick="openInvoice()">+ New invoice</button>`:''}
         ${view==='clients'?`<button class="btn" onclick="openClient()">+ New client</button>`:''}
         ${view==='payments'?`<button class="btn" onclick="openPaymentPicker()">+ Record payment</button>`:''}
@@ -235,10 +280,9 @@ function render(){
 function tabBtn(id,label,ic){return `<button class="${view===id?'active':''}" onclick="go('${id}')"><span class="ic">${ic}</span>${label}</button>`;}
 function go(v){view=v;render();window.scrollTo(0,0);}
 function renderView(){return ({dashboard:renderDashboard,invoices:renderInvoices,clients:renderClients,payments:renderPayments,settings:renderSettings}[view])();}
-function dirtyBanner(){return `<div class="banner"><span>\u25cf</span><div><b>Unsaved changes.</b> Your edits are cached in this browser. Click <b>Export store.json</b> (top right) and commit it to <code>data/store.json</code> in your repo to save permanently.</div></div>`;}
 function emptyState(t,m,a){return `<div class="panel"><div class="empty"><h3>${t}</h3><p style="margin-bottom:18px">${m}</p><div class="inline" style="justify-content:center">${a}</div></div></div>`;}
 
-/* dashboard */
+/* ===== dashboard ===== */
 function renderDashboard(){
   const invs=store.invoices||[];const yr=new Date().getFullYear();
   let collectedYTD=0,outstanding=0,overdue=0,overdueCount=0;
@@ -252,11 +296,11 @@ function renderDashboard(){
   const chart=months.map((v,i)=>`<div class="bar-wrap" title="${ml[i]}: ${fmtMoney(v)}"><div class="bv">${v?(v>=1000?'$'+Math.round(v/1000)+'k':'$'+Math.round(v)):''}</div><div class="bar" style="height:${Math.round(v/maxM*100)}%"></div><div class="bl">${ml[i]}</div></div>`).join('');
   const byC={};(store.payments||[]).forEach(p=>{const inv=invs.find(i=>i.id===p.invoiceId);if(!inv)return;byC[inv.clientId]=(byC[inv.clientId]||0)+num(p.amount);});
   const top=Object.entries(byC).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const recent=[];(store.payments||[]).forEach(p=>{const inv=invs.find(i=>i.id===p.invoiceId);recent.push({date:p.date,label:`Payment ${fmtMoney(p.amount)} \u00b7 ${inv?escapeHtml(inv.number):'?'}`});});
-  invs.forEach(inv=>recent.push({date:inv.issueDate,label:`Invoice ${escapeHtml(inv.number)} \u00b7 ${escapeHtml(clientName(inv.clientId))}`}));
+  const recent=[];(store.payments||[]).forEach(p=>{const inv=invs.find(i=>i.id===p.invoiceId);recent.push({date:p.date,label:`Payment ${fmtMoney(p.amount)} · ${inv?escapeHtml(inv.number):'?'}`});});
+  invs.forEach(inv=>recent.push({date:inv.issueDate,label:`Invoice ${escapeHtml(inv.number)} · ${escapeHtml(clientName(inv.clientId))}`}));
   recent.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const rr=recent.slice(0,8).map(r=>`<tr><td style="white-space:nowrap;color:var(--slate)">${fmtDate(r.date)}</td><td>${r.label}</td></tr>`).join('')||`<tr><td colspan="2" class="help">No activity yet.</td></tr>`;
-  return `${store.__dirty?dirtyBanner():''}
+  return `
   <div class="kpis">
     <div class="kpi"><div class="lbl">Collected ${yr}</div><div class="val green">${fmtMoney(collectedYTD)}</div><div class="meta">${fmtMoney(allTime)} all-time</div></div>
     <div class="kpi"><div class="lbl">Outstanding</div><div class="val blue">${fmtMoney(outstanding)}</div><div class="meta">across open invoices</div></div>
@@ -264,36 +308,36 @@ function renderDashboard(){
     <div class="kpi"><div class="lbl">Invoices</div><div class="val">${invs.length}</div><div class="meta">${(store.clients||[]).length} clients</div></div>
   </div>
   <div class="grid2">
-    <div class="panel"><div class="panel-h"><h3>Collected by month \u00b7 ${yr}</h3></div><div class="panel-b"><div class="chart">${chart}</div></div></div>
+    <div class="panel"><div class="panel-h"><h3>Collected by month · ${yr}</h3></div><div class="panel-b"><div class="chart">${chart}</div></div></div>
     <div class="panel"><div class="panel-h"><h3>Top clients</h3><span class="eyebrow">by collected</span></div><div class="panel-b">${top.length?top.map(([cid,amt])=>`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f0ece2"><span>${escapeHtml(clientName(cid))}</span><b style="font-variant-numeric:tabular-nums">${fmtMoney(amt)}</b></div>`).join(''):'<div class="help">No payments recorded yet.</div>'}</div></div>
   </div>
   <div class="panel"><div class="panel-h"><h3>Recent activity</h3></div><div class="panel-b" style="padding:0"><table class="tbl"><tbody>${rr}</tbody></table></div></div>`;
 }
 
-/* invoices */
+/* ===== invoices ===== */
 let invFilter={q:'',status:'all',year:'all'};
 function renderInvoices(){
   const invs=store.invoices||[];
   if(!invs.length)return emptyState('No invoices yet','Create one, or import your Excel data from Settings.',`<button class="btn" onclick="openInvoice()">+ New invoice</button> <button class="btn ghost" onclick="go('settings')">Import Excel</button>`);
   const years=Array.from(new Set(invs.map(i=>(i.issueDate||'').slice(0,4)).filter(Boolean))).sort().reverse();
-  return `${store.__dirty?dirtyBanner():''}
+  return `
   <div class="toolbar">
-    <div class="grow"><input placeholder="Search invoice # or client\u2026" value="${escapeHtml(invFilter.q)}" oninput="invFilter.q=this.value;refreshInvoiceTable()" /></div>
+    <div class="grow"><input placeholder="Search invoice # or client…" value="${escapeHtml(invFilter.q)}" oninput="invFilter.q=this.value;refreshInvoiceTable()" /></div>
     <div class="seg">${['all','draft','sent','partial','overdue','paid'].map(s=>`<button class="${invFilter.status===s?'active':''}" onclick="invFilter.status='${s}';render()">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div>
     <select style="width:auto" onchange="invFilter.year=this.value;render()"><option value="all"${invFilter.year==='all'?' selected':''}>All years</option>${years.map(y=>`<option value="${y}"${invFilter.year===y?' selected':''}>${y}</option>`).join('')}</select>
   </div>
-  <div class="panel"><div class="panel-b" style="padding:0" id="invTableWrap"><table class="tbl"><thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th>Due</th><th>Status</th><th class="num">Total</th><th class="num">Balance</th></tr></thead><tbody>${invoiceRows()}</tbody></table></div></div>`;
+  <div class="panel"><div class="panel-b" style="padding:0" id="invTableWrap"><table class="tbl"><thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th>Due</th><th>Status</th><th class="num">Total</th><th class="num">Balance</th><th></th></tr></thead><tbody>${invoiceRows()}</tbody></table></div></div>`;
 }
 function invoiceRows(){
   let rows=(store.invoices||[]).slice().sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||'')||(b.number||'').localeCompare(a.number||''));
   if(invFilter.status!=='all')rows=rows.filter(i=>invoiceState(i)===invFilter.status);
   if(invFilter.year!=='all')rows=rows.filter(i=>(i.issueDate||'').slice(0,4)===invFilter.year);
   if(invFilter.q){const q=invFilter.q.toLowerCase();rows=rows.filter(i=>(i.number||'').toLowerCase().includes(q)||clientName(i.clientId).toLowerCase().includes(q));}
-  return rows.map(inv=>{const st=invoiceState(inv);return `<tr class="row-click" onclick="openInvoice('${inv.id}')"><td><b>${escapeHtml(inv.number)}</b></td><td>${escapeHtml(clientName(inv.clientId))}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.issueDate)}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.dueDate)}</td><td><span class="pill ${st}">${st}</span></td><td class="num">${fmtMoney(invoiceTotal(inv))}</td><td class="num" style="color:${invoiceBalance(inv)>0.005?'var(--red)':'var(--green)'}">${fmtMoney(invoiceBalance(inv))}</td></tr>`;}).join('')||`<tr><td colspan="7" class="help" style="padding:24px">No invoices match these filters.</td></tr>`;
+  return rows.map(inv=>{const st=invoiceState(inv);return `<tr class="row-click" onclick="openInvoice('${inv.id}')"><td><b>${escapeHtml(inv.number)}</b></td><td>${escapeHtml(clientName(inv.clientId))}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.issueDate)}</td><td style="white-space:nowrap;color:var(--slate)">${fmtDate(inv.dueDate)}</td><td><span class="pill ${st}">${st}</span></td><td class="num">${fmtMoney(invoiceTotal(inv))}</td><td class="num" style="color:${invoiceBalance(inv)>0.005?'var(--red)':'var(--green)'}">${fmtMoney(invoiceBalance(inv))}</td><td style="text-align:right"><button class="btn ghost sm" title="Download PDF" onclick="event.stopPropagation();downloadPdf('${inv.id}')">↓ PDF</button></td></tr>`;}).join('')||`<tr><td colspan="8" class="help" style="padding:24px">No invoices match these filters.</td></tr>`;
 }
 function refreshInvoiceTable(){const w=$('#invTableWrap tbody');if(w)w.innerHTML=invoiceRows();}
 
-/* invoice modal */
+/* ===== invoice modal ===== */
 function addDays(iso,days){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+num(days));return d.toISOString().slice(0,10);}
 function openInvoice(id){
   if(id){editingInvoice=JSON.parse(JSON.stringify(store.invoices.find(i=>i.id===id)));}
@@ -312,25 +356,25 @@ function renderInvoiceModal(){
       <label class="fld"><span>Contact name</span><input value="${escapeHtml(nc.contactName)}" oninput="editingInvoice._newClient.contactName=this.value" placeholder="e.g. Ben Kelahan" /></label>
       <label class="fld full"><span>Email</span><input value="${escapeHtml(nc.email)}" oninput="editingInvoice._newClient.email=this.value" placeholder="e.g. ben@renusa.org" /></label>
     </div>`
-    :(sel?`<div class="clientreadout" style="grid-column:1/-1"><div class="h">Bill to</div><b>${escapeHtml(sel.name)}</b>${sel.contactName?'<br/>'+escapeHtml(sel.contactName):''}${sel.email?'<br/>'+escapeHtml(sel.email):''} <span class="help">\u00b7 edit in Clients tab</span></div>`:'');
+    :(sel?`<div class="clientreadout" style="grid-column:1/-1"><div class="h">Bill to</div><b>${escapeHtml(sel.name)}</b>${sel.contactName?'<br/>'+escapeHtml(sel.contactName):''}${sel.email?'<br/>'+escapeHtml(sel.email):''} <span class="help">· edit in Clients tab</span></div>`:'');
   const li=inv.lineItems.map((l,idx)=>`
     <div class="li-row">
       <div><input placeholder="Item (e.g. Professional Fee)" value="${escapeHtml(l.title)}" oninput="liEdit(${idx},'title',this.value)" style="margin-bottom:5px" /><input placeholder="Detail (e.g. RenUSA Fee)" value="${escapeHtml(l.detail)}" oninput="liEdit(${idx},'detail',this.value)" /></div>
       <input type="number" step="0.01" value="${l.quantity}" oninput="liEdit(${idx},'quantity',this.value)" />
       <input type="number" step="0.01" value="${l.rate}" oninput="liEdit(${idx},'rate',this.value)" />
       <div class="amt" id="amt${idx}">${fmtMoney(lineTotal(l))}</div>
-      <button class="del" onclick="liDel(${idx})">\u00d7</button>
+      <button class="del" onclick="liDel(${idx})">×</button>
     </div>`).join('');
   const sub=invoiceSubtotal(inv),disc=num(inv.discount),tax=(sub-disc)*(num(inv.taxRate)/100),total=invoiceTotal(inv),paid=existing?invoicePaid(inv):0,bal=total-paid;
   const payments=existing?(store.payments||[]).filter(p=>p.invoiceId===inv.id):[];
-  const payHtml=payments.length?`<div class="pay-list">${payments.map(p=>`<div class="pl-row"><span>${fmtDate(p.date)} \u00b7 <b>${fmtMoney(p.amount)}</b> \u00b7 ${escapeHtml(p.method||'')}${p.note?' \u00b7 '+escapeHtml(p.note):''}</span><button class="del" style="color:var(--red);font-size:16px" onclick="delPayment('${p.id}')">\u00d7</button></div>`).join('')}</div>`:'';
+  const payHtml=payments.length?`<div class="pay-list">${payments.map(p=>`<div class="pl-row"><span>${fmtDate(p.date)} · <b>${fmtMoney(p.amount)}</b> · ${escapeHtml(p.method||'')}${p.note?' · '+escapeHtml(p.note):''}</span><button class="del" style="color:var(--red);font-size:16px" onclick="delPayment('${p.id}')">×</button></div>`).join('')}</div>`:'';
   const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay';ov.onclick=e=>{if(e.target===ov)closeModal();};
-  ov.innerHTML=`<div class="modal"><div class="modal-h"><h2>${existing?'Edit invoice '+escapeHtml(inv.number):'New invoice'}</h2><button class="x" onclick="closeModal()">\u00d7</button></div>
+  ov.innerHTML=`<div class="modal"><div class="modal-h"><h2>${existing?'Edit invoice '+escapeHtml(inv.number):'New invoice'}</h2><button class="x" onclick="closeModal()">×</button></div>
     <div class="modal-b">
       <div class="form-grid">
         <label class="fld"><span>Invoice number</span><input value="${escapeHtml(inv.number)}" oninput="editingInvoice.number=this.value" placeholder="e.g. 2026-REN-003" /></label>
         <label class="fld"><span>Status</span><select onchange="editingInvoice.status=this.value"><option value="draft"${inv.status==='draft'?' selected':''}>Draft</option><option value="sent"${inv.status==='sent'?' selected':''}>Sent</option></select></label>
-        <label class="fld"><span>Client</span><select onchange="invClientSelect(this.value)"><option value=""${!inv.clientId&&!inv._addingClient?' selected':''}>\u2014 Select client \u2014</option>${clientOpts}<option value="__new"${inv._addingClient?' selected':''}>+ Add new client\u2026</option></select></label>
+        <label class="fld"><span>Client</span><select onchange="invClientSelect(this.value)"><option value=""${!inv.clientId&&!inv._addingClient?' selected':''}>— Select client —</option>${clientOpts}<option value="__new"${inv._addingClient?' selected':''}>+ Add new client…</option></select></label>
         <div></div>
         ${clientArea}
         <label class="fld"><span>Issue date</span><input type="date" value="${inv.issueDate||''}" oninput="editingInvoice.issueDate=this.value" /></label>
@@ -350,41 +394,67 @@ function renderInvoiceModal(){
       ${existing?`<div class="panel" style="margin-top:20px;box-shadow:none"><div class="panel-h"><h3 style="font-size:14px">Payments</h3><button class="btn ghost sm" onclick="openPaymentForm('${inv.id}')">+ Record payment</button></div><div class="panel-b">${payHtml||'<div class="help">No payments recorded.</div>'}</div></div>`:''}
     </div>
     <div class="modal-f"><div>${existing?`<button class="btn danger sm" onclick="deleteInvoice('${inv.id}')">Delete</button>`:''}</div>
-      <div class="inline">${existing?`<button class="btn ghost" onclick="printInvoice('${inv.id}')">Print / PDF</button>`:''}<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveInvoice()">${existing?'Save changes':'Create invoice'}</button></div></div>
+      <div class="inline">${existing?`<button class="btn ghost" onclick="downloadPdf('${inv.id}')">↓ Download PDF</button><button class="btn ghost" onclick="printInvoice('${inv.id}')">Print</button>`:''}<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveInvoice()">${existing?'Save changes':'Create invoice'}</button></div></div>
   </div>`;
   closeModal();document.body.appendChild(ov);
 }
-function totalsHtml(sub,disc,tax,total,existing,paid,bal){return `<div class="tr"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div><div class="tr"><span>Discount</span><span>\u2212 ${fmtMoney(disc)}</span></div><div class="tr"><span>Tax (${num(editingInvoice.taxRate)}%)</span><span>${fmtMoney(tax)}</span></div><div class="tr grand"><span>Total</span><span>${fmtMoney(total)}</span></div>${existing?`<div class="tr"><span>Paid</span><span style="color:var(--green)">${fmtMoney(paid)}</span></div><div class="tr" style="font-weight:700"><span>Balance</span><span style="color:${bal>0.005?'var(--red)':'var(--green)'}">${fmtMoney(bal)}</span></div>`:''}`;}
+function totalsHtml(sub,disc,tax,total,existing,paid,bal){return `<div class="tr"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div><div class="tr"><span>Discount</span><span>− ${fmtMoney(disc)}</span></div><div class="tr"><span>Tax (${num(editingInvoice.taxRate)}%)</span><span>${fmtMoney(tax)}</span></div><div class="tr grand"><span>Total</span><span>${fmtMoney(total)}</span></div>${existing?`<div class="tr"><span>Paid</span><span style="color:var(--green)">${fmtMoney(paid)}</span></div><div class="tr" style="font-weight:700"><span>Balance</span><span style="color:${bal>0.005?'var(--red)':'var(--green)'}">${fmtMoney(bal)}</span></div>`:''}`;}
 function renderTotals(){const inv=editingInvoice,sub=invoiceSubtotal(inv),disc=num(inv.discount),tax=(sub-disc)*(num(inv.taxRate)/100),total=invoiceTotal(inv),existing=!inv.__isNew,paid=existing?invoicePaid(inv):0,bal=total-paid;const el=$('#modalTotals');if(el)el.innerHTML=totalsHtml(sub,disc,tax,total,existing,paid,bal);}
 function liEdit(i,k,v){editingInvoice.lineItems[i][k]=v;if(k==='quantity'||k==='rate'){const a=$('#amt'+i);if(a)a.textContent=fmtMoney(lineTotal(editingInvoice.lineItems[i]));renderTotals();}}
 function liAdd(){editingInvoice.lineItems.push({title:'',detail:'',quantity:1,rate:0});renderInvoiceModal();}
 function liDel(i){editingInvoice.lineItems.splice(i,1);if(!editingInvoice.lineItems.length)editingInvoice.lineItems.push({title:'',detail:'',quantity:1,rate:0});renderInvoiceModal();}
 function invClientSelect(val){if(val==='__new'){editingInvoice.clientId='';editingInvoice._addingClient=true;}else{editingInvoice.clientId=val;editingInvoice._addingClient=false;}renderInvoiceModal();}
-function saveInvoice(){
+
+async function saveInvoice(){
   const inv=editingInvoice;
-  if(inv._addingClient){const nm=(inv._newClient.name||'').trim();if(!nm){toast('Enter the client name','warn');return;}let c=getClientByName(nm);if(!c){c={id:uid(),name:nm,contactName:inv._newClient.contactName||'',email:inv._newClient.email||'',addressLines:[]};store.clients.push(c);}inv.clientId=c.id;}
+  if(inv._addingClient){
+    const nm=(inv._newClient.name||'').trim();
+    if(!nm){toast('Enter the client name','warn');return;}
+    let c=getClientByName(nm);
+    if(!c){
+      c={id:uid(),name:nm,contactName:inv._newClient.contactName||'',email:inv._newClient.email||'',addressLines:[]};
+      try{await dbUpsertClient(c);}catch(e){toast('Save client failed: '+e.message,'err');return;}
+      store.clients.push(c);
+    }
+    inv.clientId=c.id;
+  }
   if(!inv.clientId){toast('Pick or add a client first','warn');return;}
   if(!inv.number||!inv.number.trim()){toast('Invoice number required','warn');return;}
   const wasNew=inv.__isNew;delete inv.__isNew;delete inv._addingClient;delete inv._newClient;
+  // numeric coerce
+  inv.taxRate=num(inv.taxRate);inv.discount=num(inv.discount);
+  try{await dbUpsertInvoice(inv);}catch(e){toast('Save failed: '+e.message,'err');return;}
   const idx=store.invoices.findIndex(i=>i.id===inv.id);if(idx>=0)store.invoices[idx]=inv;else store.invoices.push(inv);
-  if(wasNew){const pfx=store.settings.invoicePrefix||'';if(inv.number.startsWith(pfx)){const n=parseInt(inv.number.slice(pfx.length));if(!isNaN(n)&&n>=store.settings.nextNumber)store.settings.nextNumber=n+1;}}
-  persistLocal();closeModal();render();toast(wasNew?'Invoice created':'Invoice saved');
+  if(wasNew){
+    const pfx=store.settings.invoicePrefix||'';
+    if(inv.number.startsWith(pfx)){
+      const n=parseInt(inv.number.slice(pfx.length));
+      if(!isNaN(n)&&n>=store.settings.nextNumber){store.settings.nextNumber=n+1;persistSettings();}
+    }
+  }
+  closeModal();render();toast(wasNew?'Invoice created':'Invoice saved');
 }
-function deleteInvoice(id){if(!confirm('Delete this invoice? Linked payments will also be removed.'))return;store.invoices=store.invoices.filter(i=>i.id!==id);store.payments=store.payments.filter(p=>p.invoiceId!==id);persistLocal();closeModal();render();toast('Invoice deleted');}
+async function deleteInvoice(id){
+  if(!confirm('Delete this invoice? Linked payments will also be removed.'))return;
+  try{await dbDeleteInvoice(id);}catch(e){toast('Delete failed: '+e.message,'err');return;}
+  store.invoices=store.invoices.filter(i=>i.id!==id);
+  store.payments=store.payments.filter(p=>p.invoiceId!==id); // FK cascade in DB; mirror locally
+  closeModal();render();toast('Invoice deleted');
+}
 function closeModal(){const o=$('#modalOverlay');if(o)o.remove();}
 
-/* clients */
+/* ===== clients ===== */
 function renderClients(){
   const cs=(store.clients||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));
   if(!cs.length)return emptyState('No clients yet','Add a client once and it auto-fills on every invoice.',`<button class="btn" onclick="openClient()">+ New client</button>`);
   const body=cs.map(c=>{const inv=(store.invoices||[]).filter(i=>i.clientId===c.id);const billed=inv.reduce((s,i)=>s+invoiceTotal(i),0);return `<tr class="row-click" onclick="openClient('${c.id}')"><td><b>${escapeHtml(c.name)}</b></td><td>${escapeHtml(c.contactName||'')}</td><td>${escapeHtml(c.email||'')}</td><td class="num">${inv.length}</td><td class="num">${fmtMoney(billed)}</td></tr>`;}).join('');
-  return `${store.__dirty?dirtyBanner():''}<div class="panel"><div class="panel-b" style="padding:0"><table class="tbl"><thead><tr><th>Client / company</th><th>Contact</th><th>Email</th><th class="num">Invoices</th><th class="num">Billed</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+  return `<div class="panel"><div class="panel-b" style="padding:0"><table class="tbl"><thead><tr><th>Client / company</th><th>Contact</th><th>Email</th><th class="num">Invoices</th><th class="num">Billed</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 function openClient(id){editingClient=id?JSON.parse(JSON.stringify(clientById(id))):{id:uid(),name:'',contactName:'',email:'',addressLines:[],__isNew:true};renderClientModal();}
 function renderClientModal(){
   const c=editingClient,existing=!c.__isNew;
   const ov=document.createElement('div');ov.className='overlay';ov.id='clientOverlay';ov.onclick=e=>{if(e.target===ov)ov.remove();};
-  ov.innerHTML=`<div class="modal" style="max-width:560px"><div class="modal-h"><h2>${existing?'Edit client':'New client'}</h2><button class="x" onclick="this.closest('.overlay').remove()">\u00d7</button></div>
+  ov.innerHTML=`<div class="modal" style="max-width:560px"><div class="modal-h"><h2>${existing?'Edit client':'New client'}</h2><button class="x" onclick="this.closest('.overlay').remove()">×</button></div>
     <div class="modal-b"><div class="form-grid">
       <label class="fld full"><span>Client / company name *</span><input id="clName" value="${escapeHtml(c.name)}" placeholder="e.g. RenUSA" /></label>
       <label class="fld"><span>Contact name</span><input id="clContact" value="${escapeHtml(c.contactName||'')}" placeholder="e.g. Ben Kelahan" /></label>
@@ -394,10 +464,25 @@ function renderClientModal(){
     <div class="modal-f"><div>${existing?`<button class="btn danger sm" onclick="deleteClient('${c.id}')">Delete</button>`:''}</div><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="saveClient()">${existing?'Save':'Add client'}</button></div></div></div>`;
   const ex=$('#clientOverlay');if(ex)ex.remove();document.body.appendChild(ov);
 }
-function saveClient(){const c=editingClient;const name=$('#clName').value.trim();if(!name){toast('Client name required','warn');return;}c.name=name;c.contactName=$('#clContact').value.trim();c.email=$('#clEmail').value.trim();c.addressLines=$('#clAddr').value.split('\n').map(s=>s.trim()).filter(Boolean);const wasNew=c.__isNew;delete c.__isNew;const idx=store.clients.findIndex(x=>x.id===c.id);if(idx>=0)store.clients[idx]=c;else store.clients.push(c);persistLocal();$('#clientOverlay').remove();render();toast(wasNew?'Client added':'Client saved');}
-function deleteClient(id){const used=(store.invoices||[]).some(i=>i.clientId===id);if(used){toast('This client is on existing invoices. Reassign or delete those first.','warn');return;}if(!confirm('Delete this client?'))return;store.clients=store.clients.filter(c=>c.id!==id);persistLocal();const o=$('#clientOverlay');if(o)o.remove();render();toast('Client deleted');}
+async function saveClient(){
+  const c=editingClient;const name=$('#clName').value.trim();
+  if(!name){toast('Client name required','warn');return;}
+  c.name=name;c.contactName=$('#clContact').value.trim();c.email=$('#clEmail').value.trim();c.addressLines=$('#clAddr').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const wasNew=c.__isNew;delete c.__isNew;
+  try{await dbUpsertClient(c);}catch(e){toast('Save failed: '+e.message,'err');return;}
+  const idx=store.clients.findIndex(x=>x.id===c.id);if(idx>=0)store.clients[idx]=c;else store.clients.push(c);
+  $('#clientOverlay').remove();render();toast(wasNew?'Client added':'Client saved');
+}
+async function deleteClient(id){
+  const used=(store.invoices||[]).some(i=>i.clientId===id);
+  if(used){toast('This client is on existing invoices. Reassign or delete those first.','warn');return;}
+  if(!confirm('Delete this client?'))return;
+  try{await dbDeleteClient(id);}catch(e){toast('Delete failed: '+e.message,'err');return;}
+  store.clients=store.clients.filter(c=>c.id!==id);
+  const o=$('#clientOverlay');if(o)o.remove();render();toast('Client deleted');
+}
 
-/* payments */
+/* ===== payments ===== */
 let payFilter={q:'',year:'all'};
 function renderPayments(){
   const pays=(store.payments||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -406,21 +491,36 @@ function renderPayments(){
   let rows=pays;if(payFilter.year!=='all')rows=rows.filter(p=>(p.date||'').slice(0,4)===payFilter.year);
   if(payFilter.q){const q=payFilter.q.toLowerCase();rows=rows.filter(p=>{const inv=store.invoices.find(i=>i.id===p.invoiceId);return (inv&&(inv.number.toLowerCase().includes(q)||clientName(inv.clientId).toLowerCase().includes(q)))||(p.method||'').toLowerCase().includes(q);});}
   const yr=new Date().getFullYear();const ytd=pays.filter(p=>(p.date||'').slice(0,4)==String(yr)).reduce((s,p)=>s+num(p.amount),0);const all=pays.reduce((s,p)=>s+num(p.amount),0);
-  const body=rows.map(p=>{const inv=store.invoices.find(i=>i.id===p.invoiceId);return `<tr><td style="white-space:nowrap;color:var(--slate)">${fmtDate(p.date)}</td><td>${inv?`<b class="row-click" onclick="openInvoice('${inv.id}')" style="color:var(--blue)">${escapeHtml(inv.number)}</b>`:'<span class="help">(deleted)</span>'}</td><td>${inv?escapeHtml(clientName(inv.clientId)):'\u2014'}</td><td>${escapeHtml(p.method||'')}</td><td class="help">${escapeHtml(p.note||'')}</td><td class="num"><b>${fmtMoney(p.amount)}</b></td><td><button class="del" style="color:var(--red);font-size:17px" onclick="delPayment('${p.id}')">\u00d7</button></td></tr>`;}).join('')||`<tr><td colspan="7" class="help" style="padding:24px">No payments match.</td></tr>`;
-  return `${store.__dirty?dirtyBanner():''}<div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="lbl">Collected ${yr}</div><div class="val green">${fmtMoney(ytd)}</div></div><div class="kpi"><div class="lbl">All-time collected</div><div class="val blue">${fmtMoney(all)}</div></div><div class="kpi"><div class="lbl">Payments logged</div><div class="val">${pays.length}</div></div></div>
-  <div class="toolbar"><div class="grow"><input placeholder="Search invoice, client, method\u2026" value="${escapeHtml(payFilter.q)}" oninput="payFilter.q=this.value;render()" /></div><select style="width:auto" onchange="payFilter.year=this.value;render()"><option value="all"${payFilter.year==='all'?' selected':''}>All years</option>${years.map(y=>`<option value="${y}"${payFilter.year===y?' selected':''}>${y}</option>`).join('')}</select></div>
+  const body=rows.map(p=>{const inv=store.invoices.find(i=>i.id===p.invoiceId);return `<tr><td style="white-space:nowrap;color:var(--slate)">${fmtDate(p.date)}</td><td>${inv?`<b class="row-click" onclick="openInvoice('${inv.id}')" style="color:var(--blue)">${escapeHtml(inv.number)}</b>`:'<span class="help">(deleted)</span>'}</td><td>${inv?escapeHtml(clientName(inv.clientId)):'—'}</td><td>${escapeHtml(p.method||'')}</td><td class="help">${escapeHtml(p.note||'')}</td><td class="num"><b>${fmtMoney(p.amount)}</b></td><td><button class="del" style="color:var(--red);font-size:17px" onclick="delPayment('${p.id}')">×</button></td></tr>`;}).join('')||`<tr><td colspan="7" class="help" style="padding:24px">No payments match.</td></tr>`;
+  return `<div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="lbl">Collected ${yr}</div><div class="val green">${fmtMoney(ytd)}</div></div><div class="kpi"><div class="lbl">All-time collected</div><div class="val blue">${fmtMoney(all)}</div></div><div class="kpi"><div class="lbl">Payments logged</div><div class="val">${pays.length}</div></div></div>
+  <div class="toolbar"><div class="grow"><input placeholder="Search invoice, client, method…" value="${escapeHtml(payFilter.q)}" oninput="payFilter.q=this.value;render()" /></div><select style="width:auto" onchange="payFilter.year=this.value;render()"><option value="all"${payFilter.year==='all'?' selected':''}>All years</option>${years.map(y=>`<option value="${y}"${payFilter.year===y?' selected':''}>${y}</option>`).join('')}</select></div>
   <div class="panel"><div class="panel-b" style="padding:0"><table class="tbl"><thead><tr><th>Date</th><th>Invoice</th><th>Client</th><th>Method</th><th>Note</th><th class="num">Amount</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
-function openPaymentPicker(){const open=(store.invoices||[]).filter(i=>invoiceBalance(i)>0.005).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''));if(!open.length){toast('No invoices with an open balance','warn');return;}const opts=open.map(i=>`<option value="${i.id}">${escapeHtml(i.number)} \u00b7 ${escapeHtml(clientName(i.clientId))} \u00b7 bal ${fmtMoney(invoiceBalance(i))}</option>`).join('');const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay';ov.onclick=e=>{if(e.target===ov)closeModal();};ov.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Record payment</h2><button class="x" onclick="closeModal()">\u00d7</button></div><div class="modal-b"><label class="fld"><span>Apply to invoice</span><select id="ppSel">${opts}</select></label></div><div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="openPaymentForm($('#ppSel').value)">Continue</button></div></div></div>`;closeModal();document.body.appendChild(ov);}
-function openPaymentForm(invoiceId){const inv=store.invoices.find(i=>i.id===invoiceId);if(!inv){toast('Invoice not found','err');return;}const bal=invoiceBalance(inv);const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay2';ov.style.zIndex=110;ov.onclick=e=>{if(e.target===ov)ov.remove();};ov.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Payment \u00b7 ${escapeHtml(inv.number)}</h2><button class="x" onclick="this.closest('.overlay').remove()">\u00d7</button></div><div class="modal-b"><p class="help" style="margin-bottom:14px">${escapeHtml(clientName(inv.clientId))} \u00b7 Balance ${fmtMoney(bal)}</p><div class="form-grid"><label class="fld"><span>Date</span><input type="date" id="pfDate" value="${todayISO()}" /></label><label class="fld"><span>Amount</span><input type="number" step="0.01" id="pfAmt" value="${bal>0?bal.toFixed(2):''}" /></label><label class="fld"><span>Method</span><select id="pfMethod"><option>Check</option><option>ACH / transfer</option><option>Credit card</option><option>Cash</option><option>Wire</option><option>Other</option></select></label><label class="fld"><span>Note (optional)</span><input id="pfNote" placeholder="e.g. check #1043" /></label></div></div><div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="savePayment('${inv.id}')">Save payment</button></div></div></div>`;document.body.appendChild(ov);}
-function savePayment(invoiceId){const amt=num($('#pfAmt').value);if(amt<=0){toast('Enter an amount','warn');return;}store.payments.push({id:uid(),invoiceId,date:$('#pfDate').value||todayISO(),amount:amt,method:$('#pfMethod').value,note:$('#pfNote').value||''});persistLocal();const o2=$('#modalOverlay2');if(o2)o2.remove();if($('#modalOverlay')&&editingInvoice)renderInvoiceModal();render();toast('Payment recorded');}
-function delPayment(id){if(!confirm('Delete this payment?'))return;store.payments=store.payments.filter(p=>p.id!==id);persistLocal();if($('#modalOverlay')&&editingInvoice)renderInvoiceModal();render();toast('Payment deleted');}
+function openPaymentPicker(){const open=(store.invoices||[]).filter(i=>invoiceBalance(i)>0.005).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''));if(!open.length){toast('No invoices with an open balance','warn');return;}const opts=open.map(i=>`<option value="${i.id}">${escapeHtml(i.number)} · ${escapeHtml(clientName(i.clientId))} · bal ${fmtMoney(invoiceBalance(i))}</option>`).join('');const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay';ov.onclick=e=>{if(e.target===ov)closeModal();};ov.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Record payment</h2><button class="x" onclick="closeModal()">×</button></div><div class="modal-b"><label class="fld"><span>Apply to invoice</span><select id="ppSel">${opts}</select></label></div><div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="openPaymentForm($('#ppSel').value)">Continue</button></div></div></div>`;closeModal();document.body.appendChild(ov);}
+function openPaymentForm(invoiceId){const inv=store.invoices.find(i=>i.id===invoiceId);if(!inv){toast('Invoice not found','err');return;}const bal=invoiceBalance(inv);const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay2';ov.style.zIndex=110;ov.onclick=e=>{if(e.target===ov)ov.remove();};ov.innerHTML=`<div class="modal" style="max-width:480px"><div class="modal-h"><h2>Payment · ${escapeHtml(inv.number)}</h2><button class="x" onclick="this.closest('.overlay').remove()">×</button></div><div class="modal-b"><p class="help" style="margin-bottom:14px">${escapeHtml(clientName(inv.clientId))} · Balance ${fmtMoney(bal)}</p><div class="form-grid"><label class="fld"><span>Date</span><input type="date" id="pfDate" value="${todayISO()}" /></label><label class="fld"><span>Amount</span><input type="number" step="0.01" id="pfAmt" value="${bal>0?bal.toFixed(2):''}" /></label><label class="fld"><span>Method</span><select id="pfMethod"><option>Check</option><option>ACH / transfer</option><option>Credit card</option><option>Cash</option><option>Wire</option><option>Other</option></select></label><label class="fld"><span>Note (optional)</span><input id="pfNote" placeholder="e.g. check #1043" /></label></div></div><div class="modal-f"><span></span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="savePayment('${inv.id}')">Save payment</button></div></div></div>`;document.body.appendChild(ov);}
+async function savePayment(invoiceId){
+  const amt=num($('#pfAmt').value);
+  if(amt<=0){toast('Enter an amount','warn');return;}
+  const p={id:uid(),invoiceId,date:$('#pfDate').value||todayISO(),amount:amt,method:$('#pfMethod').value,note:$('#pfNote').value||''};
+  try{await dbUpsertPayment(p);}catch(e){toast('Save failed: '+e.message,'err');return;}
+  store.payments.push(p);
+  const o2=$('#modalOverlay2');if(o2)o2.remove();
+  if($('#modalOverlay')&&editingInvoice)renderInvoiceModal();
+  render();toast('Payment recorded');
+}
+async function delPayment(id){
+  if(!confirm('Delete this payment?'))return;
+  try{await dbDeletePayment(id);}catch(e){toast('Delete failed: '+e.message,'err');return;}
+  store.payments=store.payments.filter(p=>p.id!==id);
+  if($('#modalOverlay')&&editingInvoice)renderInvoiceModal();
+  render();toast('Payment deleted');
+}
 
-/* settings */
+/* ===== settings ===== */
 function renderSettings(){
   const b=store.settings.business;
-  return `${store.__dirty?dirtyBanner():''}<div class="stack" style="max-width:760px">
-    <div class="panel"><div class="panel-h"><h3>Business details</h3></div><div class="panel-b"><div class="form-grid">
+  return `<div class="stack" style="max-width:760px">
+    <div class="panel"><div class="panel-h"><h3>Business details</h3><span class="eyebrow">Auto-saves</span></div><div class="panel-b"><div class="form-grid">
       <label class="fld"><span>Business name</span><input value="${escapeHtml(b.name||'')}" oninput="setB('name',this.value)" /></label>
       <label class="fld"><span>Email</span><input value="${escapeHtml(b.email||'')}" oninput="setB('email',this.value)" /></label>
       <label class="fld"><span>Phone</span><input value="${escapeHtml(b.phone||'')}" oninput="setB('phone',this.value)" /></label>
@@ -430,55 +530,94 @@ function renderSettings(){
     <div class="panel"><div class="panel-h"><h3>Invoice logo</h3><span class="eyebrow">PNG or JPG</span></div><div class="panel-b">
       <div class="inline" style="gap:18px">
         <div style="width:200px;height:80px;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden">${b.logo?`<img src="${b.logo}" style="max-width:100%;max-height:100%;object-fit:contain" />`:'<span class="help">No logo set</span>'}</div>
-        <div><input type="file" accept="image/png,image/jpeg" onchange="handleLogo(this.files[0])" style="padding:8px" />${b.logo?`<div style="margin-top:8px"><button class="btn danger sm" onclick="removeLogo()">Remove logo</button></div>`:''}<p class="help" style="margin-top:8px;max-width:300px">Stored inside store.json so it travels with your repo. Auto-scaled to keep the file small.</p></div>
+        <div><input type="file" accept="image/png,image/jpeg" onchange="handleLogo(this.files[0])" style="padding:8px" />${b.logo?`<div style="margin-top:8px"><button class="btn danger sm" onclick="removeLogo()">Remove logo</button></div>`:''}<p class="help" style="margin-top:8px;max-width:300px">Saved to Supabase. Auto-scaled to keep size reasonable.</p></div>
       </div>
     </div></div>
     <div class="panel"><div class="panel-h"><h3>Invoice defaults</h3></div><div class="panel-b"><div class="form-grid">
-      <label class="fld"><span>Currency (ISO code)</span><input value="${escapeHtml(store.settings.currency||'USD')}" oninput="store.settings.currency=this.value.toUpperCase();persistLocal()" /></label>
-      <label class="fld"><span>Invoice prefix</span><input value="${escapeHtml(store.settings.invoicePrefix||'')}" oninput="store.settings.invoicePrefix=this.value;persistLocal()" /></label>
-      <label class="fld"><span>Next invoice number</span><input type="number" value="${store.settings.nextNumber||1}" oninput="store.settings.nextNumber=parseInt(this.value)||1;persistLocal()" /></label>
-      <label class="fld"><span>Default tax rate (%)</span><input type="number" step="0.01" value="${store.settings.defaultTaxRate||0}" oninput="store.settings.defaultTaxRate=num(this.value);persistLocal()" /></label>
-      <label class="fld"><span>Payment terms (days)</span><input type="number" value="${store.settings.paymentTermsDays||30}" oninput="store.settings.paymentTermsDays=parseInt(this.value)||30;persistLocal()" /></label>
-      <label class="fld"><span>Default invoice notes</span><input value="${escapeHtml(store.settings.notesDefault||'')}" oninput="store.settings.notesDefault=this.value;persistLocal()" /></label>
+      <label class="fld"><span>Currency (ISO code)</span><input value="${escapeHtml(store.settings.currency||'USD')}" oninput="store.settings.currency=this.value.toUpperCase();persistSettings()" /></label>
+      <label class="fld"><span>Invoice prefix</span><input value="${escapeHtml(store.settings.invoicePrefix||'')}" oninput="store.settings.invoicePrefix=this.value;persistSettings()" /></label>
+      <label class="fld"><span>Next invoice number</span><input type="number" value="${store.settings.nextNumber||1}" oninput="store.settings.nextNumber=parseInt(this.value)||1;persistSettings()" /></label>
+      <label class="fld"><span>Default tax rate (%)</span><input type="number" step="0.01" value="${store.settings.defaultTaxRate||0}" oninput="store.settings.defaultTaxRate=num(this.value);persistSettings()" /></label>
+      <label class="fld"><span>Payment terms (days)</span><input type="number" value="${store.settings.paymentTermsDays||30}" oninput="store.settings.paymentTermsDays=parseInt(this.value)||30;persistSettings()" /></label>
+      <label class="fld"><span>Default invoice notes</span><input value="${escapeHtml(store.settings.notesDefault||'')}" oninput="store.settings.notesDefault=this.value;persistSettings()" /></label>
     </div></div></div>
-    <div class="panel"><div class="panel-h"><h3>Import from Excel</h3><span class="eyebrow">.xlsx / .xls / .csv</span></div><div class="panel-b"><p class="help" style="margin-bottom:12px">Upload your TCG workbook. You map your columns on the next screen, so it works whatever your headers are called.</p><input type="file" accept=".xlsx,.xls,.csv" onchange="handleExcel(this.files[0])" style="padding:8px" /></div></div>
-    <div class="panel"><div class="panel-h"><h3>Backup &amp; export</h3></div><div class="panel-b"><p class="help" style="margin-bottom:14px">Source of truth is <code>data/store.json</code>. After changes, export and commit it.</p><div class="inline"><button class="btn" onclick="exportStore()">Export store.json</button><button class="btn ghost" onclick="exportInvoicesCSV()">Invoices CSV</button><button class="btn ghost" onclick="exportPaymentsCSV()">Payments CSV</button></div><hr style="border:none;border-top:1px solid var(--line);margin:18px 0" /><p class="help" style="margin-bottom:10px">Load a <code>store.json</code> from disk (replaces current data in this browser):</p><input type="file" accept=".json" onchange="handleJSON(this.files[0])" style="padding:8px;max-width:340px" /></div></div>
-    <div class="panel" style="box-shadow:none;border-color:#e7c9c9"><div class="panel-h"><h3 style="color:var(--red)">Danger zone</h3></div><div class="panel-b"><button class="btn danger" onclick="wipeAll()">Clear all data in this browser</button><p class="help" style="margin-top:8px">Only clears the local cache. Your committed <code>data/store.json</code> is untouched until you overwrite it.</p></div></div>
+    <div class="panel"><div class="panel-h"><h3>Import from Excel</h3><span class="eyebrow">.xlsx / .xls / .csv</span></div><div class="panel-b"><p class="help" style="margin-bottom:12px">Upload a workbook. Map your columns on the next screen.</p><input type="file" accept=".xlsx,.xls,.csv" onchange="handleExcel(this.files[0])" style="padding:8px" /></div></div>
+    <div class="panel"><div class="panel-h"><h3>Export</h3></div><div class="panel-b"><p class="help" style="margin-bottom:14px">Your data lives in Supabase — saved instantly as you work. These exports are for accountants and offline backups.</p><div class="inline"><button class="btn ghost" onclick="exportInvoicesCSV()">Invoices CSV</button><button class="btn ghost" onclick="exportPaymentsCSV()">Payments CSV</button></div></div></div>
+    <div class="panel"><div class="panel-h"><h3>Session</h3></div><div class="panel-b"><p class="help" style="margin-bottom:12px">Signed in. Click below to sign out of this browser.</p><button class="btn ghost" onclick="signOut()">Sign out</button></div></div>
   </div>`;
 }
-function setB(k,v){store.settings.business[k]=v;persistLocal();}
-function handleLogo(file){if(!file)return;const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const max=600;let w=img.width,h=img.height;if(w>max){h=Math.round(h*max/w);w=max;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);store.settings.business.logo=c.toDataURL('image/png');persistLocal();render();toast('Logo saved');};img.src=r.result;};r.readAsDataURL(file);}
-function removeLogo(){store.settings.business.logo='';persistLocal();render();toast('Logo removed');}
-function handleJSON(file){if(!file)return;const r=new FileReader();r.onload=()=>{try{store=normalize(JSON.parse(r.result));persistLocal();render();toast('Loaded store.json');}catch(e){toast('Invalid JSON file','err');}};r.readAsText(file);}
-function wipeAll(){if(!confirm('Clear all locally cached data? Your repo data/store.json is not affected.'))return;localStorage.removeItem(LS_KEY);location.reload();}
+function setB(k,v){store.settings.business[k]=v;persistSettings();}
+function handleLogo(file){if(!file)return;const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const max=600;let w=img.width,h=img.height;if(w>max){h=Math.round(h*max/w);w=max;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);store.settings.business.logo=c.toDataURL('image/png');persistSettings();render();toast('Logo saved');};img.src=r.result;};r.readAsDataURL(file);}
+function removeLogo(){store.settings.business.logo='';persistSettings();render();toast('Logo removed');}
 
-/* excel import */
+/* ===== CSV export ===== */
+function download(fn,txt,type='application/json'){const b=new Blob([txt],{type});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}
+function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function exportInvoicesCSV(){const rows=[['Invoice #','Client','Issue Date','Due Date','Status','Subtotal','Discount','Tax %','Total','Paid','Balance']];(store.invoices||[]).forEach(inv=>{rows.push([inv.number,clientName(inv.clientId),inv.issueDate||'',inv.dueDate||'',invoiceState(inv),invoiceSubtotal(inv).toFixed(2),num(inv.discount).toFixed(2),num(inv.taxRate),invoiceTotal(inv).toFixed(2),invoicePaid(inv).toFixed(2),invoiceBalance(inv).toFixed(2)]);});download('tcg-invoices.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');}
+function exportPaymentsCSV(){const rows=[['Date','Invoice #','Client','Amount','Method','Note']];(store.payments||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(p=>{const inv=(store.invoices||[]).find(i=>i.id===p.invoiceId);rows.push([p.date||'',inv?inv.number:'',inv?clientName(inv.clientId):'',num(p.amount).toFixed(2),p.method||'',p.note||'']);});download('tcg-payments.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');}
+
+/* ===== excel import ===== */
 function handleExcel(file){if(!file)return;const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});importState={wb,sheets:wb.SheetNames,sheet:wb.SheetNames[0],rows:null,headers:null,map:{}};loadSheet(wb.SheetNames[0]);renderImportModal();}catch(err){console.error(err);toast('Could not read that file','err');}};r.readAsArrayBuffer(file);}
 function loadSheet(name){const ws=importState.wb.Sheets[name];const json=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});let hi=0;while(hi<json.length&&json[hi].every(c=>String(c).trim()===''))hi++;const headers=(json[hi]||[]).map(h=>String(h).trim());const rows=json.slice(hi+1).filter(r=>r.some(c=>String(c).trim()!=='')).map(r=>{const o={};headers.forEach((h,i)=>o[h]=r[i]);return o;});importState.sheet=name;importState.headers=headers;importState.rows=rows;importState.map=autoMap(headers);}
 function autoMap(headers){const want={number:['invoice','invoice #','invoice number','number','inv','inv #','invoice no','no'],client:['client','customer','customer name','client name','company','bill to','account'],issueDate:['date','invoice date','issue date','issued','created'],dueDate:['due','due date','date due','payment due'],amount:['total','amount','invoice total','grand total','amount due','value'],paid:['paid','amount paid','payment','payments','paid amount','received'],status:['status','state'],title:['item','service','product','title'],detail:['description','memo','notes','details','line item']};const map={};const lc=headers.map(h=>h.toLowerCase());Object.entries(want).forEach(([f,names])=>{let idx=-1;for(const n of names){idx=lc.indexOf(n);if(idx>=0)break;}if(idx<0){for(let i=0;i<lc.length;i++){if(names.some(n=>lc[i].includes(n))){idx=i;break;}}}if(idx>=0)map[f]=headers[idx];});return map;}
 function renderImportModal(){
   const fields=[['number','Invoice number',true],['client','Client / customer',true],['issueDate','Issue date',false],['dueDate','Due date',false],['amount','Invoice total',true],['paid','Amount already paid',false],['status','Status',false],['title','Item title',false],['detail','Detail / description',false]];
-  const hOpts=sel=>`<option value="">\u2014 ignore \u2014</option>`+importState.headers.map(h=>`<option value="${escapeHtml(h)}"${importState.map[sel]===h?' selected':''}>${escapeHtml(h)}</option>`).join('');
+  const hOpts=sel=>`<option value="">— ignore —</option>`+importState.headers.map(h=>`<option value="${escapeHtml(h)}"${importState.map[sel]===h?' selected':''}>${escapeHtml(h)}</option>`).join('');
   const sOpts=importState.sheets.map(s=>`<option value="${escapeHtml(s)}"${importState.sheet===s?' selected':''}>${escapeHtml(s)}</option>`).join('');
   const ov=document.createElement('div');ov.className='overlay';ov.id='importOverlay';ov.onclick=e=>{if(e.target===ov)ov.remove();};
-  ov.innerHTML=`<div class="modal" style="max-width:820px"><div class="modal-h"><h2>Map your Excel columns</h2><button class="x" onclick="this.closest('.overlay').remove()">\u00d7</button></div><div class="modal-b">
+  ov.innerHTML=`<div class="modal" style="max-width:820px"><div class="modal-h"><h2>Map your Excel columns</h2><button class="x" onclick="this.closest('.overlay').remove()">×</button></div><div class="modal-b">
     <div class="inline" style="margin-bottom:16px"><label class="fld" style="max-width:260px"><span>Sheet</span><select onchange="loadSheet(this.value);renderImportModal()">${sOpts}</select></label><div class="help" style="align-self:flex-end;padding-bottom:10px">${importState.rows.length} data rows detected</div></div>
     <div class="map-grid">${fields.map(([f,label,req])=>`<div class="ml">${label}${req?' <span style="color:var(--red)">*</span>':''}</div><select onchange="importState.map['${f}']=this.value;renderImportPreview()">${hOpts(f)}</select>`).join('')}</div>
-    <div class="banner" style="margin-top:18px"><span>\u2139</span><div>Map <b>Amount already paid</b> and a matching payment is created automatically. Existing invoice numbers are <b>skipped</b> (no duplicates).</div></div>
+    <div class="banner" style="margin-top:18px"><span>ℹ</span><div>Map <b>Amount already paid</b> and a matching payment is created automatically. Existing invoice numbers are <b>skipped</b> (no duplicates).</div></div>
     <h4 style="margin:14px 0 8px;font-size:13px">Preview <span class="help">(first 5 rows)</span></h4><div id="importPreview" style="overflow-x:auto">${buildImportPreview()}</div>
   </div><div class="modal-f"><span class="help">Existing data is kept; rows are added.</span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="runImport()">Import ${importState.rows.length} rows</button></div></div></div>`;
   const ex=$('#importOverlay');if(ex)ex.remove();document.body.appendChild(ov);
 }
 function renderImportPreview(){const el=$('#importPreview');if(el)el.innerHTML=buildImportPreview();}
-function buildImportPreview(){const m=importState.map;const rows=importState.rows.slice(0,5).map(r=>{const total=parseMoney(r[m.amount]);const paid=m.paid?parseMoney(r[m.paid]):0;return `<tr><td>${escapeHtml(r[m.number]||'')}</td><td>${escapeHtml(r[m.client]||'')}</td><td>${escapeHtml(parseDateLoose(r[m.issueDate])||'')}</td><td class="num">${total?fmtMoney(total):''}</td><td class="num">${m.paid?(paid?fmtMoney(paid):''):'\u2014'}</td></tr>`;}).join('')||'<tr><td colspan="5" class="help">No rows.</td></tr>';return `<table class="tbl"><thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th class="num">Total</th><th class="num">Paid</th></tr></thead><tbody>${rows}</tbody></table>`;}
+function buildImportPreview(){const m=importState.map;const rows=importState.rows.slice(0,5).map(r=>{const total=parseMoney(r[m.amount]);const paid=m.paid?parseMoney(r[m.paid]):0;return `<tr><td>${escapeHtml(r[m.number]||'')}</td><td>${escapeHtml(r[m.client]||'')}</td><td>${escapeHtml(parseDateLoose(r[m.issueDate])||'')}</td><td class="num">${total?fmtMoney(total):''}</td><td class="num">${m.paid?(paid?fmtMoney(paid):''):'—'}</td></tr>`;}).join('')||'<tr><td colspan="5" class="help">No rows.</td></tr>';return `<table class="tbl"><thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th class="num">Total</th><th class="num">Paid</th></tr></thead><tbody>${rows}</tbody></table>`;}
 function parseMoney(v){if(v==null||v==='')return 0;if(typeof v==='number')return v;const n=parseFloat(String(v).replace(/[^0-9.\-]/g,''));return isNaN(n)?0:n;}
 function parseDateLoose(v){if(v==null||v==='')return '';if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,10);if(typeof v==='number'){const d=new Date(Math.round((v-25569)*86400*1000));if(!isNaN(d))return d.toISOString().slice(0,10);}const d=new Date(String(v).trim());if(!isNaN(d))return d.toISOString().slice(0,10);return '';}
-function runImport(){const m=importState.map;if(!m.number||!m.client||!m.amount){toast('Map invoice #, client, and total first','warn');return;}let added=0,skipped=0,pays=0;importState.rows.forEach(r=>{const numv=String(r[m.number]||'').trim();if(!numv){skipped++;return;}if(store.invoices.some(i=>(i.number||'').trim().toLowerCase()===numv.toLowerCase())){skipped++;return;}const c=ensureClient(r[m.client]);const issue=parseDateLoose(r[m.issueDate])||'';const due=parseDateLoose(r[m.dueDate])||(issue?addDays(issue,store.settings.paymentTermsDays||30):'');const total=parseMoney(r[m.amount]);const title=m.title?String(r[m.title]||''):'Professional Fee';const detail=m.detail?String(r[m.detail]||''):'';let status='sent';if(m.status){const s=String(r[m.status]||'').toLowerCase();if(s.includes('draft'))status='draft';}const inv={id:uid(),number:numv,clientId:c?c.id:'',issueDate:issue,dueDate:due,status,lineItems:[{title:title||'Professional Fee',detail,quantity:1,rate:total}],taxRate:0,discount:0,notes:''};store.invoices.push(inv);added++;if(m.paid){const paid=parseMoney(r[m.paid]);if(paid>0){store.payments.push({id:uid(),invoiceId:inv.id,date:issue||todayISO(),amount:paid,method:'Imported',note:'Imported from Excel'});pays++;}}const pfx=store.settings.invoicePrefix||'';if(numv.startsWith(pfx)){const n=parseInt(numv.slice(pfx.length));if(!isNaN(n)&&n>=store.settings.nextNumber)store.settings.nextNumber=n+1;}});persistLocal();const o=$('#importOverlay');if(o)o.remove();render();toast(`Imported ${added} invoices${pays?`, ${pays} payments`:''}${skipped?`, skipped ${skipped}`:''}`);}
+async function runImport(){
+  const m=importState.map;
+  if(!m.number||!m.client||!m.amount){toast('Map invoice #, client, and total first','warn');return;}
+  const newClients=[],newInvoices=[],newPayments=[];
+  let added=0,skipped=0,pays=0;
+  const ensureCli=(name)=>{
+    if(!name)return null;
+    let c=getClientByName(name);
+    if(c)return c;
+    c={id:uid(),name:String(name).trim(),contactName:'',email:'',addressLines:[]};
+    store.clients.push(c);newClients.push(c);
+    return c;
+  };
+  importState.rows.forEach(r=>{
+    const numv=String(r[m.number]||'').trim();if(!numv){skipped++;return;}
+    if(store.invoices.some(i=>(i.number||'').trim().toLowerCase()===numv.toLowerCase())){skipped++;return;}
+    const c=ensureCli(r[m.client]);
+    const issue=parseDateLoose(r[m.issueDate])||'';
+    const due=parseDateLoose(r[m.dueDate])||(issue?addDays(issue,store.settings.paymentTermsDays||30):'');
+    const total=parseMoney(r[m.amount]);
+    const title=m.title?String(r[m.title]||''):'Professional Fee';
+    const detail=m.detail?String(r[m.detail]||''):'';
+    let status='sent';if(m.status){const s=String(r[m.status]||'').toLowerCase();if(s.includes('draft'))status='draft';}
+    const inv={id:uid(),number:numv,clientId:c?c.id:'',issueDate:issue,dueDate:due,status,lineItems:[{title:title||'Professional Fee',detail,quantity:1,rate:total}],taxRate:0,discount:0,notes:''};
+    store.invoices.push(inv);newInvoices.push(inv);added++;
+    if(m.paid){const paid=parseMoney(r[m.paid]);if(paid>0){const p={id:uid(),invoiceId:inv.id,date:issue||todayISO(),amount:paid,method:'Imported',note:'Imported from Excel'};store.payments.push(p);newPayments.push(p);pays++;}}
+    const pfx=store.settings.invoicePrefix||'';
+    if(numv.startsWith(pfx)){const n=parseInt(numv.slice(pfx.length));if(!isNaN(n)&&n>=store.settings.nextNumber)store.settings.nextNumber=n+1;}
+  });
+  try{
+    if(newClients.length){const {error}=await sb.from('clients').upsert(newClients.map(toDBClient));if(error)throw error;}
+    if(newInvoices.length){const {error}=await sb.from('invoices').upsert(newInvoices.map(toDBInvoice));if(error)throw error;}
+    if(newPayments.length){const {error}=await sb.from('payments').upsert(newPayments.map(toDBPayment));if(error)throw error;}
+    persistSettings();
+  }catch(e){toast('Import failed: '+e.message,'err');return;}
+  const o=$('#importOverlay');if(o)o.remove();render();toast(`Imported ${added} invoices${pays?`, ${pays} payments`:''}${skipped?`, skipped ${skipped}`:''}`);
+}
 
-/* print (Wave-style) */
+/* ===== print + PDF ===== */
 function logoBlock(){const logo=store.settings.business.logo;return logo?`<img class="pi-logo" src="${logo}" alt="logo" />`:`<div class="co">The Casey<span> Group</span></div>`;}
-function printInvoice(id){
-  const inv=store.invoices.find(i=>i.id===id);if(!inv)return;
+function buildPrintArea(inv){
   const c=clientById(inv.clientId)||{name:'',contactName:'',email:'',addressLines:[]};
   const b=store.settings.business;
   const sub=invoiceSubtotal(inv),disc=num(inv.discount),tax=(sub-disc)*(num(inv.taxRate)/100),total=invoiceTotal(inv),paid=invoicePaid(inv),bal=total-paid;
@@ -499,24 +638,56 @@ function printInvoice(id){
     <table class="pt"><thead><tr><th>Items</th><th class="num">Quantity</th><th class="num">Price</th><th class="num">Amount</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="pt-tot">
       <div class="r"><span>Total:</span><span>${fmtMoney(total)}</span></div>
-      ${(disc)?`<div class="r"><span>Discount:</span><span>\u2212 ${fmtMoney(disc)}</span></div>`:''}
+      ${(disc)?`<div class="r"><span>Discount:</span><span>− ${fmtMoney(disc)}</span></div>`:''}
       ${num(inv.taxRate)?`<div class="r"><span>Tax (${num(inv.taxRate)}%):</span><span>${fmtMoney(tax)}</span></div>`:''}
-      ${paid?`<div class="r"><span>Paid:</span><span>\u2212 ${fmtMoney(paid)}</span></div>`:''}
+      ${paid?`<div class="r"><span>Paid:</span><span>− ${fmtMoney(paid)}</span></div>`:''}
       <div class="r ad"><span>Amount Due (USD):</span><span>${fmtMoney(bal)}</span></div>
     </div>
     ${inv.notes?`<div class="pi-foot">${escapeHtml(inv.notes)}</div>`:''}`;
+}
+function printInvoice(id){
+  const inv=store.invoices.find(i=>i.id===id);if(!inv)return;
+  buildPrintArea(inv);
   setTimeout(()=>window.print(),60);
 }
+async function downloadPdf(id){
+  const inv=store.invoices.find(i=>i.id===id);if(!inv){toast('Invoice not found','err');return;}
+  buildPrintArea(inv);
+  const ph=document.querySelector('.print-only');
+  const el=document.getElementById('printArea');
+  const originalStyle=ph.getAttribute('style')||'';
+  // Force the print container to be laid-out off-screen so html2canvas can render it
+  ph.setAttribute('style','display:block;position:fixed;left:-99999px;top:0;width:794px;background:#fff;padding:24px;z-index:-1');
+  toast('Generating PDF…');
+  try{
+    await html2pdf().set({
+      margin:[12,14,12,14],
+      filename:`Invoice-${(inv.number||'invoice').replace(/[^\w\-]/g,'_')}.pdf`,
+      image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
+      jsPDF:{unit:'mm',format:'letter',orientation:'portrait'}
+    }).from(el).save();
+    toast('PDF downloaded');
+  }catch(e){console.error(e);toast('PDF failed: '+e.message,'err');}
+  finally{ph.setAttribute('style',originalStyle);}
+}
 
-/* icons */
+/* ===== icons ===== */
 function svgGrid(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';}
 function svgDoc(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>';}
 function svgUsers(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';}
 function svgCash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>';}
 function svgGear(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';}
 
-/* boot */
-(async function(){await loadStore();render();})();
+/* ===== boot ===== */
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){renderLogin();return;}
+  try{await loadStore();render();}
+  catch(e){console.error(e);renderLogin('Could not load data: '+(e.message||e));}
+}
+sb.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT')location.reload();});
+boot();
 </script>
 </body>
 </html>
