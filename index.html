@@ -118,7 +118,17 @@
   .login-card{background:var(--white);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:28px;max-width:380px;width:100%}
   .login-card h2{font-size:22px;margin-bottom:4px}
   .login-card .sub{font-size:13px;color:var(--slate);margin-bottom:22px}
-  @media (max-width:860px){.sidebar{display:none}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.content,.topbar{padding-left:18px;padding-right:18px}}
+  .menu-btn{display:none;align-items:center;justify-content:center;width:38px;height:38px;border-radius:9px;border:1px solid var(--line);background:var(--white);color:var(--ink);flex-shrink:0}
+  .menu-btn:hover{border-color:var(--accent-2)}
+  .menu-btn svg{width:20px;height:20px}
+  .backdrop{display:none;position:fixed;inset:0;background:rgba(10,31,61,.5);z-index:55}
+  @media (max-width:860px){
+    .menu-btn{display:inline-flex}
+    .sidebar{position:fixed;top:0;left:0;height:100vh;z-index:60;transform:translateX(-100%);transition:transform .25s ease;box-shadow:0 14px 40px rgba(0,0,0,.35)}
+    .sidebar.open{transform:translateX(0)}
+    .backdrop.open{display:block}
+    .kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.content,.topbar{padding-left:18px;padding-right:18px}
+  }
   /* print */
   .print-only{display:none}
   @media print{.app{display:none!important}.print-only{display:block!important}body{background:#fff}@page{size:letter;margin:16mm}}
@@ -266,9 +276,13 @@ function render(){
     </nav>
     <div class="foot">${escapeHtml(store.settings.business.name||'The Casey Group')}<br/>${escapeHtml(store.settings.business.email||'')}<br/><span style="color:var(--accent-2)">Synced to Supabase</span></div>
   </aside>
+  <div class="backdrop" onclick="closeMenu()"></div>
   <div class="main">
     <div class="topbar">
-      <div><h1>${title}</h1><div class="sb">${sub}</div></div>
+      <div class="inline" style="gap:13px;flex-wrap:nowrap">
+        <button class="menu-btn" onclick="toggleMenu()" aria-label="Open menu">${svgMenu()}</button>
+        <div><h1>${title}</h1><div class="sb">${sub}</div></div>
+      </div>
       <div class="inline">
         ${view==='invoices'?`<button class="btn" onclick="openInvoice()">+ New invoice</button>`:''}
         ${view==='clients'?`<button class="btn" onclick="openClient()">+ New client</button>`:''}
@@ -279,7 +293,9 @@ function render(){
   </div>`;
 }
 function tabBtn(id,label,ic){return `<button class="${view===id?'active':''}" onclick="go('${id}')"><span class="ic">${ic}</span>${label}</button>`;}
-function go(v){view=v;render();window.scrollTo(0,0);}
+function go(v){view=v;render();window.scrollTo(0,0);closeMenu();}
+function toggleMenu(){document.querySelector('.sidebar')?.classList.toggle('open');document.querySelector('.backdrop')?.classList.toggle('open');}
+function closeMenu(){document.querySelector('.sidebar')?.classList.remove('open');document.querySelector('.backdrop')?.classList.remove('open');}
 function renderView(){return ({dashboard:renderDashboard,invoices:renderInvoices,clients:renderClients,payments:renderPayments,settings:renderSettings}[view])();}
 function emptyState(t,m,a){return `<div class="panel"><div class="empty"><h3>${t}</h3><p style="margin-bottom:18px">${m}</p><div class="inline" style="justify-content:center">${a}</div></div></div>`;}
 
@@ -667,6 +683,7 @@ function downloadPdf(id){
 const printInvoice=downloadPdf;
 
 /* ===== icons ===== */
+function svgMenu(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';}
 function svgGrid(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';}
 function svgDoc(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>';}
 function svgUsers(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';}
