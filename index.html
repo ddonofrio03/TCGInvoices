@@ -664,7 +664,6 @@ function renderStates(){
     .sort((a,b)=>b.n-a.n||b.p-a.p||a.st.localeCompare(b.st));
   const homeN=(sets.get(home)||new Set()).size, homeBonus=travelDays.size;
   const topAway=rows.filter(r=>r.st!==home)[0]||null;
-  const visited=rows.filter(r=>r.st!==home).length;
 
   const toolbar=`<div class="toolbar">
     <div class="seg">${years.map(y=>`<button class="${y===stateYear?'active':''}" onclick="stateYear=${y};render()">${y}</button>`).join('')}</div>
@@ -676,10 +675,9 @@ function renderStates(){
 
   const banner=home?'':`<div class="banner"><b>Pick your home state first.</b> Every day you don't log a trip for counts as your home state, so the totals below stay empty until you set it.</div>`;
 
-  const kpis=`<div class="kpis">
+  const kpis=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr))">
     <div class="kpi"><div class="lbl">${escapeHtml(home||'Home')} days</div><div class="val blue">${homeN}</div><div class="meta">${homeN-homeBonus} full days + ${homeBonus} travel day${homeBonus===1?'':'s'}</div></div>
     <div class="kpi"><div class="lbl">Days away</div><div class="val">${awayDays}</div><div class="meta">${unsetDays?unsetDays+' days unassigned':'of '+elapsed+' days so far'}</div></div>
-    <div class="kpi"><div class="lbl">Other states visited</div><div class="val">${visited}</div><div class="meta">${visited?rows.filter(r=>r.st!==home).map(r=>r.st).slice(0,6).join(', '):'No trips logged'}</div></div>
     <div class="kpi"><div class="lbl">Closest to 183</div><div class="val ${topAway&&topAway.n>=WATCH_THRESHOLD?'red':''}">${topAway?topAway.st+' · '+topAway.n:'—'}</div><div class="meta">${topAway?(RESIDENCY_THRESHOLD-topAway.n>0?(RESIDENCY_THRESHOLD-topAway.n)+' days of headroom today':'over the 183-day line'):'Nothing logged away from home'}</div></div>
   </div>`;
 
