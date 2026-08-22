@@ -59,3 +59,39 @@ create policy "authed full access" on payments for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "authed full access" on settings for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ===== State presence tracker =====
+-- Trips are date ranges; overrides pin a single day. Home state lives in the
+-- settings JSONB row, so every unlogged day counts as home.
+
+create table if not exists location_trips (
+  id                text primary key,
+  state             text not null,
+  start_date        date not null,
+  end_date          date not null,
+  purpose           text default '',
+  travel_days_home  boolean not null default true,
+  created_at        timestamptz default now()
+);
+
+create table if not exists location_overrides (
+  id          text primary key,
+  date        date not null unique,
+  state       text not null,
+  note        text default '',
+  created_at  timestamptz default now()
+);
+
+create index if not exists location_trips_start_date_idx on location_trips(start_date);
+create index if not exists location_overrides_date_idx   on location_overrides(date);
+
+alter table location_trips     enable row level security;
+alter table location_overrides enable row level security;
+
+drop policy if exists "authed full access" on location_trips;
+drop policy if exists "authed full access" on location_overrides;
+
+create policy "authed full access" on location_trips for all
+  using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "authed full access" on location_overrides for all
+  using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
