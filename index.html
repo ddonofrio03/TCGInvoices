@@ -51,7 +51,7 @@
   .btn.danger:hover{background:#fbeeee}
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
   .kpi{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:17px 18px;box-shadow:var(--shadow)}
-  .kpi .lbl{font-family:'JetBrains Mono';font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate)}
+  .kpi .lbl{font-family:'JetBrains Mono';font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate)}
   .kpi .val{font-family:'Inter Tight';font-size:27px;font-weight:700;margin-top:7px;color:var(--ink)}
   .kpi .val.blue{color:var(--blue)} .kpi .val.red{color:var(--red)} .kpi .val.green{color:var(--green)}
   .kpi .meta{font-size:12px;color:var(--gray);margin-top:3px}
@@ -622,7 +622,6 @@ function countThrough(year){
   if(y>cy)return null;
   return today;
 }
-function elapsedDays(year){const c=countThrough(year);if(!c)return 0;let n=0;eachDay(year+'-01-01',c,()=>n++);return n;}
 
 /* Presence days can double-count a travel day in two states — that is how the
    183-day tests actually work, so per-state totals may exceed the day count.
@@ -654,10 +653,8 @@ function renderStates(){
   (store.overrides||[]).forEach(o=>{if(o.date)yrs.add(+o.date.slice(0,4));});
   const years=Array.from(yrs).filter(y=>y>1900).sort((a,b)=>b-a);
   const {days,sets,travelDays,cutoff}=presence(stateYear);
-  const elapsed=elapsedDays(stateYear);
-
-  let awayDays=0,unsetDays=0;
-  days.forEach((v,d)=>{if(cutoff===null||d>cutoff)return;if(!v.state)unsetDays++;else if(v.state!==home)awayDays++;});
+  let unsetDays=0;
+  days.forEach((v,d)=>{if(cutoff===null||d>cutoff)return;if(!v.state)unsetDays++;});
   const proj=presence(stateYear,stateYear+'-12-31').sets;
   const allStates=new Set([...sets.keys(),...proj.keys()]);
   const rows=Array.from(allStates).map(st=>({st,n:(sets.get(st)||new Set()).size,p:(proj.get(st)||new Set()).size}))
@@ -675,10 +672,13 @@ function renderStates(){
 
   const banner=home?'':`<div class="banner"><b>Pick your home state first.</b> Every day you don't log a trip for counts as your home state, so the totals below stay empty until you set it.</div>`;
 
-  const kpis=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr))">
+  const awayMeta=topAway
+    ?(RESIDENCY_THRESHOLD-topAway.n>0?(RESIDENCY_THRESHOLD-topAway.n)+' days to the 183-day line':'past the 183-day line')
+    :(unsetDays?unsetDays+' days unassigned':'Nothing logged away from home');
+  const kpis=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
     <div class="kpi"><div class="lbl">${escapeHtml(home||'Home')} days</div><div class="val blue">${homeN}</div><div class="meta">${homeN-homeBonus} full days + ${homeBonus} travel day${homeBonus===1?'':'s'}</div></div>
-    <div class="kpi"><div class="lbl">Days away</div><div class="val">${awayDays}</div><div class="meta">${unsetDays?unsetDays+' days unassigned':'of '+elapsed+' days so far'}</div></div>
-    <div class="kpi"><div class="lbl">Closest to 183</div><div class="val ${topAway&&topAway.n>=WATCH_THRESHOLD?'red':''}">${topAway?topAway.st+' · '+topAway.n:'—'}</div><div class="meta">${topAway?(RESIDENCY_THRESHOLD-topAway.n>0?(RESIDENCY_THRESHOLD-topAway.n)+' days of headroom today':'over the 183-day line'):'Nothing logged away from home'}</div></div>
+    <div class="kpi"><div class="lbl">${escapeHtml(topAway?topAway.st:'Away')} days</div><div class="val ${topAway&&topAway.n>=WATCH_THRESHOLD?'red':''}">${topAway?topAway.n:0}</div><div class="meta">${awayMeta}</div></div>
+    <div class="kpi"><div class="lbl">Split of days</div>${splitHtml(rows)}</div>
   </div>`;
 
   const tblBody=rows.length?rows.map(r=>{
@@ -730,6 +730,34 @@ function renderStates(){
   </div>`:'';
 
   return banner+toolbar+kpis+summary+calendar+tripPanel+ovrPanel;
+}
+
+/* Donut of the actual split, so the slices tie to the day counts on the cards beside it. */
+function splitHtml(rows){
+  const all=rows.filter(r=>r.n>0);
+  if(!all.length)return `<div class="val">—</div><div class="meta">No days counted yet</div>`;
+  let slices=all.slice(0,4).map(r=>({st:r.st,n:r.n,color:stateColor(r.st)}));
+  const rest=all.slice(4).reduce((a,r)=>a+r.n,0);
+  if(rest)slices.push({st:'Other',n:rest,color:'#9aa4b2'});
+  const total=slices.reduce((a,s)=>a+s.n,0);
+  const R=32, C=2*Math.PI*R;
+  let off=0;
+  const arcs=slices.map(s=>{
+    const len=total?s.n/total*C:0;
+    const el=`<circle cx="50" cy="50" r="${R}" fill="none" stroke="${s.color}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 50 50)"></circle>`;
+    off+=len;return el;
+  }).join('');
+  const pct=s=>total?Math.round(s.n/total*100):0;
+  const legend=slices.map(s=>`<div class="inline" style="gap:7px;flex-wrap:nowrap;font-size:13px">
+      <span class="st-dot" style="background:${s.color};margin:0;flex:none"></span><b>${escapeHtml(s.st)}</b>
+      <span style="margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums"><b>${pct(s)}%</b> <span class="help">${s.n}d</span></span>
+    </div>`).join('');
+  return `<div class="inline" style="gap:15px;flex-wrap:nowrap;margin-top:11px">
+    <svg viewBox="0 0 100 100" width="84" height="84" style="flex:none" role="img" aria-label="Share of days by state">
+      <circle cx="50" cy="50" r="${R}" fill="none" stroke="#ece7db" stroke-width="14"></circle>${arcs}
+    </svg>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">${legend}</div>
+  </div>`;
 }
 
 function calendarHtml(year,days){
