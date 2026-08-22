@@ -162,8 +162,9 @@
   #printArea .pt-tot .r.ad{font-weight:700;font-size:15.5px;border-bottom:none;border-top:2px solid #333;margin-top:4px;padding-top:10px}
   #printArea .pi-foot{margin-top:46px;font-size:12.5px;color:#666;border-top:1px solid #e5e5e5;padding-top:12px;white-space:pre-wrap}
   /* ===== state presence tracker ===== */
-  .st-bar{height:8px;border-radius:5px;background:#ece7db;overflow:hidden;min-width:110px}
-  .st-bar i{display:block;height:100%;border-radius:5px}
+  .st-bar{position:relative;height:8px;border-radius:5px;background:#ece7db;overflow:hidden;min-width:110px}
+  .st-bar i{position:absolute;left:0;top:0;height:100%;border-radius:5px}
+  .st-bar i.ghost{opacity:.3}
   .st-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:-1px}
   .cal-year{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:20px 18px}
   .cal-m .cal-t{font-family:'JetBrains Mono';font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);margin-bottom:7px}
@@ -224,8 +225,8 @@ function fromDBPayment(r){return {id:r.id,invoiceId:r.invoice_id,date:r.date||''
 function toDBPayment(o){return {id:o.id,invoice_id:o.invoiceId,date:o.date||null,amount:num(o.amount),method:o.method||'',note:o.note||''};}
 function fromDBTrip(r){return {id:r.id,state:r.state||'',startDate:r.start_date||'',endDate:r.end_date||'',purpose:r.purpose||'',travelDaysHome:r.travel_days_home!==false,createdAt:r.created_at||''};}
 function toDBTrip(o){return {id:o.id,state:o.state,start_date:o.startDate,end_date:o.endDate,purpose:o.purpose||'',travel_days_home:!!o.travelDaysHome};}
-function fromDBOverride(r){return {id:r.id,date:r.date,state:r.state||'',note:r.note||''};}
-function toDBOverride(o){return {id:o.id,date:o.date,state:o.state,note:o.note||''};}
+function fromDBOverride(r){return {id:r.id,date:r.date,state:r.state||'',note:r.note||'',sticky:r.sticky===true};}
+function toDBOverride(o){return {id:o.id,date:o.date,state:o.state,note:o.note||'',sticky:!!o.sticky};}
 
 /* ===== load + persist ===== */
 async function loadStore(){
@@ -569,6 +570,7 @@ const RESIDENCY_THRESHOLD=183, WATCH_THRESHOLD=150;
 let stateYear=new Date().getFullYear(), editingTrip=null;
 
 function stateLabel(c){return c?(STATE_NAMES[c]||c):'Not set';}
+function shortDate(iso){const d=parseISO(iso);return isNaN(d)?iso:d.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
 function awayStates(){
   const st=new Set();
   (store.trips||[]).forEach(t=>{if(t.state)st.add(t.state);});
@@ -590,32 +592,57 @@ function eachDay(a,b,fn){if(!a||!b||a>b)return;const d=parseISO(a),e=parseISO(b)
 function dayCount(a,b){let n=0;eachDay(a,b,()=>n++);return n;}
 function yearLength(y){return ((y%4===0&&y%100!==0)||y%400===0)?366:365;}
 
-/* Resolve every day of a year to exactly one state: home < trip < day override. */
+/* Resolve every day of a year to exactly one state, in four passes:
+     1. the home state everywhere (or a carried-forward mark still in force from a prior year)
+     2. marks flagged sticky carry their state forward until the next mark
+     3. logged trips punch through for their explicit ranges, then the carry resumes
+     4. every mark always wins on its own day, so a one-day fix inside a trip sticks */
 function dayMap(year){
   const map=new Map(), home=store.settings.homeState||'';
-  eachDay(year+'-01-01',year+'-12-31',d=>map.set(d,{state:home,src:home?'home':'none'}));
+  const marks=(store.overrides||[]).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const jan1=year+'-01-01', dec31=year+'-12-31';
+  let base=home, baseSrc=home?'home':'none', baseFrom='';
+  for(const m of marks)if(m.sticky&&m.date&&m.date<jan1){base=m.state;baseSrc='carry';baseFrom=m.date;}
+  eachDay(jan1,dec31,d=>map.set(d,{state:base,src:baseSrc,markDate:baseFrom}));
+  for(const m of marks){
+    if(!m.sticky||!m.date||m.date.slice(0,4)!==String(year))continue;
+    eachDay(m.date,dec31,d=>map.set(d,{state:m.state,src:'carry',markDate:m.date}));
+  }
   const trips=(store.trips||[]).slice().sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
   for(const t of trips)eachDay(t.startDate,t.endDate,d=>{if(map.has(d))map.set(d,{state:t.state,src:'trip',tripId:t.id});});
-  for(const o of (store.overrides||[]))if(map.has(o.date))map.set(o.date,{state:o.state,src:'override',note:o.note||''});
+  for(const m of marks)if(map.has(m.date))map.set(m.date,{state:m.state,src:'override',note:m.note||'',sticky:!!m.sticky});
   return map;
 }
 
+/* Counting stops at today: days you have not lived yet are shown but not counted.
+   Past years count in full; a future year counts nothing. */
+function countThrough(year){
+  const today=todayISO(), y=String(year), cy=today.slice(0,4);
+  if(y<cy)return year+'-12-31';
+  if(y>cy)return null;
+  return today;
+}
+function elapsedDays(year){const c=countThrough(year);if(!c)return 0;let n=0;eachDay(year+'-01-01',c,()=>n++);return n;}
+
 /* Presence days can double-count a travel day in two states — that is how the
-   183-day tests actually work, so per-state totals may exceed the year length. */
-function presence(year){
+   183-day tests actually work, so per-state totals may exceed the day count.
+   Pass `through` to project a full year instead of stopping at today. */
+function presence(year,through){
   const days=dayMap(year), sets=new Map(), home=store.settings.homeState||'';
-  const add=(st,d)=>{if(!st)return;if(!sets.has(st))sets.set(st,new Set());sets.get(st).add(d);};
+  const cutoff=through===undefined?countThrough(year):through;
+  const counted=d=>cutoff!==null&&d<=cutoff;
+  const add=(st,d)=>{if(!st||!counted(d))return;if(!sets.has(st))sets.set(st,new Set());sets.get(st).add(d);};
   days.forEach((v,d)=>add(v.state,d));
   const travelDays=new Set();
   if(home)for(const t of (store.trips||[])){
     if(!t.travelDaysHome||t.state===home)continue;
     for(const d of [t.startDate,t.endDate]){
       const cur=days.get(d);
-      if(!cur||cur.src==='override')continue;
+      if(!cur||cur.src==='override'||!counted(d))continue;
       add(home,d);travelDays.add(d);
     }
   }
-  return {days,sets,travelDays};
+  return {days,sets,travelDays,cutoff};
 }
 function thrClass(n){return n>=RESIDENCY_THRESHOLD?'overdue':n>=WATCH_THRESHOLD?'partial':'paid';}
 function thrLabel(n){return n>=RESIDENCY_THRESHOLD?'At 183+':n>=WATCH_THRESHOLD?'Watch':'Clear';}
@@ -626,11 +653,15 @@ function renderStates(){
   (store.trips||[]).forEach(t=>{if(t.startDate)yrs.add(+t.startDate.slice(0,4));if(t.endDate)yrs.add(+t.endDate.slice(0,4));});
   (store.overrides||[]).forEach(o=>{if(o.date)yrs.add(+o.date.slice(0,4));});
   const years=Array.from(yrs).filter(y=>y>1900).sort((a,b)=>b-a);
-  const {days,sets,travelDays}=presence(stateYear);
+  const {days,sets,travelDays,cutoff}=presence(stateYear);
+  const elapsed=elapsedDays(stateYear);
 
   let awayDays=0,unsetDays=0;
-  days.forEach(v=>{if(!v.state)unsetDays++;else if(v.state!==home)awayDays++;});
-  const rows=Array.from(sets.entries()).map(([st,s])=>({st,n:s.size})).sort((a,b)=>b.n-a.n||a.st.localeCompare(b.st));
+  days.forEach((v,d)=>{if(cutoff===null||d>cutoff)return;if(!v.state)unsetDays++;else if(v.state!==home)awayDays++;});
+  const proj=presence(stateYear,stateYear+'-12-31').sets;
+  const allStates=new Set([...sets.keys(),...proj.keys()]);
+  const rows=Array.from(allStates).map(st=>({st,n:(sets.get(st)||new Set()).size,p:(proj.get(st)||new Set()).size}))
+    .sort((a,b)=>b.n-a.n||b.p-a.p||a.st.localeCompare(b.st));
   const homeN=(sets.get(home)||new Set()).size, homeBonus=travelDays.size;
   const topAway=rows.filter(r=>r.st!==home)[0]||null;
   const visited=rows.filter(r=>r.st!==home).length;
@@ -647,26 +678,28 @@ function renderStates(){
 
   const kpis=`<div class="kpis">
     <div class="kpi"><div class="lbl">${escapeHtml(home||'Home')} days</div><div class="val blue">${homeN}</div><div class="meta">${homeN-homeBonus} full days + ${homeBonus} travel day${homeBonus===1?'':'s'}</div></div>
-    <div class="kpi"><div class="lbl">Days away</div><div class="val">${awayDays}</div><div class="meta">${unsetDays?unsetDays+' days unassigned':'Every day assigned'}</div></div>
+    <div class="kpi"><div class="lbl">Days away</div><div class="val">${awayDays}</div><div class="meta">${unsetDays?unsetDays+' days unassigned':'of '+elapsed+' days so far'}</div></div>
     <div class="kpi"><div class="lbl">Other states visited</div><div class="val">${visited}</div><div class="meta">${visited?rows.filter(r=>r.st!==home).map(r=>r.st).slice(0,6).join(', '):'No trips logged'}</div></div>
-    <div class="kpi"><div class="lbl">Closest to 183</div><div class="val ${topAway&&topAway.n>=WATCH_THRESHOLD?'red':''}">${topAway?topAway.st+' · '+topAway.n:'—'}</div><div class="meta">${topAway?(RESIDENCY_THRESHOLD-topAway.n>0?(RESIDENCY_THRESHOLD-topAway.n)+' days of headroom':'over the 183-day line'):'Nothing logged away from home'}</div></div>
+    <div class="kpi"><div class="lbl">Closest to 183</div><div class="val ${topAway&&topAway.n>=WATCH_THRESHOLD?'red':''}">${topAway?topAway.st+' · '+topAway.n:'—'}</div><div class="meta">${topAway?(RESIDENCY_THRESHOLD-topAway.n>0?(RESIDENCY_THRESHOLD-topAway.n)+' days of headroom today':'over the 183-day line'):'Nothing logged away from home'}</div></div>
   </div>`;
 
   const tblBody=rows.length?rows.map(r=>{
-    const pct=Math.min(100,r.n/RESIDENCY_THRESHOLD*100);
+    const c=stateColor(r.st), pctA=Math.min(100,r.n/RESIDENCY_THRESHOLD*100), pctP=Math.min(100,r.p/RESIDENCY_THRESHOLD*100);
+    const over=r.p>=RESIDENCY_THRESHOLD&&r.st!==home;
     return `<tr>
-      <td><span class="st-dot" style="background:${stateColor(r.st)}"></span><b>${r.st}</b> <span class="help">${escapeHtml(STATE_NAMES[r.st]||'')}</span>${r.st===home?' <span class="pill sent">Home</span>':''}</td>
+      <td><span class="st-dot" style="background:${c}"></span><b>${r.st}</b> <span class="help">${escapeHtml(STATE_NAMES[r.st]||'')}</span>${r.st===home?' <span class="pill sent">Home</span>':''}</td>
       <td class="num"><b>${r.n}</b></td>
-      <td class="num help">${(r.n/yearLength(stateYear)*100).toFixed(0)}%</td>
-      <td><div class="st-bar"><i style="width:${pct}%;background:${stateColor(r.st)}"></i></div></td>
-      <td>${r.st===home?'<span class="pill sent">Resident</span>':`<span class="pill ${thrClass(r.n)}">${thrLabel(r.n)}</span>`}</td>
+      <td class="num" style="color:${over?'var(--red)':'var(--gray)'}">${r.p}${r.p>r.n?` <span style="font-size:12px">(+${r.p-r.n})</span>`:''}</td>
+      <td><div class="st-bar"><i class="ghost" style="width:${pctP}%;background:${c}"></i><i style="width:${pctA}%;background:${c}"></i></div></td>
+      <td>${r.st===home?'<span class="pill sent">Resident</span>':`<span class="pill ${thrClass(r.p)}">${thrLabel(r.p)}</span>`}</td>
     </tr>`;
-  }).join(''):`<tr><td colspan="5" class="help" style="padding:24px">Nothing to count yet for ${stateYear}.</td></tr>`;
+  }).join(''):`<tr><td colspan="5" class="help" style="padding:24px">${cutoff===null?stateYear+' has not started yet — logged trips will count as the days arrive.':'Nothing to count yet for '+stateYear+'.'}</td></tr>`;
 
   const summary=`<div class="panel">
-    <div class="panel-h"><h3>Presence days by state · ${stateYear}</h3><span class="eyebrow">183-day test</span></div>
-    <div class="panel-b tbl-wrap" style="padding:0"><table class="tbl"><thead><tr><th>State</th><th class="num">Presence days</th><th class="num">% of year</th><th style="width:180px">Toward 183</th><th>Status</th></tr></thead><tbody>${tblBody}</tbody></table></div>
-    <div class="panel-b" style="border-top:1px solid var(--line)"><p class="help">A presence day is any day you set foot in the state, partial days included. Travel days therefore count in two states at once, so these totals can add up to more than ${yearLength(stateYear)}. The 183-day line is the common statutory-residency trigger, but the exact rule varies by state — treat this as your log, not as tax advice.</p></div>
+    <div class="panel-h"><h3>Presence days by state · ${stateYear}</h3><span class="eyebrow">${cutoff===null?'Not started':'Actual through '+shortDate(cutoff)}</span></div>
+    <div class="panel-b tbl-wrap" style="padding:0"><table class="tbl"><thead><tr><th>State</th><th class="num">Actual</th><th class="num">Projected</th><th style="width:180px">Toward 183</th><th>Status</th></tr></thead><tbody>${tblBody}</tbody></table></div>
+    <div class="panel-b" style="border-top:1px solid var(--line)"><p class="help"><b style="color:var(--ink)">Actual</b> counts only days you have already lived, through ${cutoff===null?stateYear:fmtDate(cutoff)}. <b style="color:var(--ink)">Projected</b> is where the year lands if every trip you have logged holds — the solid bar is actual, the faded bar is projected. The status badge follows the projection, so a state trending past 183 turns red before you get there.</p>
+    <p class="help" style="margin-top:9px">A presence day is any day you set foot in the state, partial days included. Travel days therefore count in two states at once, so these totals can add up to more than ${yearLength(stateYear)}. The 183-day line is the common statutory-residency trigger, but the exact rule varies by state — treat this as your log, not as tax advice.</p></div>
   </div>`;
 
   const legendStates=rows.map(r=>r.st);
@@ -674,8 +707,8 @@ function renderStates(){
   const legend=`<div class="legend">${legendStates.map(s=>`<span><span class="st-dot" style="background:${stateColor(s)}"></span>${escapeHtml(s?s+' — '+(STATE_NAMES[s]||s):'Unassigned')}</span>`).join('')}</div>`;
 
   const calendar=`<div class="panel">
-    <div class="panel-h"><h3>${stateYear} calendar</h3><span class="eyebrow">Click any day to override it</span></div>
-    <div class="panel-b">${calendarHtml(stateYear,days)}<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">${legend}<p class="help" style="margin-top:10px">A dark outline marks a day you overrode by hand.</p></div></div>
+    <div class="panel-h"><h3>${stateYear} calendar</h3><span class="eyebrow">Click any day to set where you were</span></div>
+    <div class="panel-b">${calendarHtml(stateYear,days)}<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">${legend}<p class="help" style="margin-top:10px">A dark outline marks a day you set by hand. Faded days are still ahead of today — shown so you can see logged trips coming, but not counted until you get there.</p></div></div>
   </div>`;
 
   const trips=(store.trips||[]).slice().sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||''));
@@ -694,8 +727,8 @@ function renderStates(){
 
   const ovr=(store.overrides||[]).filter(o=>(o.date||'').slice(0,4)===String(stateYear)).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   const ovrPanel=ovr.length?`<div class="panel">
-    <div class="panel-h"><h3>Day overrides · ${stateYear}</h3><span class="eyebrow">${ovr.length} day${ovr.length===1?'':'s'}</span></div>
-    <div class="panel-b tbl-wrap" style="padding:0"><table class="tbl"><thead><tr><th>Date</th><th>State</th><th>Note</th><th></th></tr></thead><tbody>${ovr.map(o=>`<tr><td style="white-space:nowrap">${fmtDate(o.date)}</td><td><span class="st-dot" style="background:${stateColor(o.state)}"></span><b>${escapeHtml(o.state)}</b></td><td class="help">${escapeHtml(o.note||'')}</td><td><button class="del" style="color:var(--red);font-size:17px" onclick="clearOverride('${o.date}')">×</button></td></tr>`).join('')}</tbody></table></div>
+    <div class="panel-h"><h3>Marked days · ${stateYear}</h3><span class="eyebrow">${ovr.length} day${ovr.length===1?'':'s'}</span></div>
+    <div class="panel-b tbl-wrap" style="padding:0"><table class="tbl"><thead><tr><th>Date</th><th>State</th><th>Applies to</th><th>Note</th><th></th></tr></thead><tbody>${ovr.map(o=>`<tr><td style="white-space:nowrap">${fmtDate(o.date)}</td><td><span class="st-dot" style="background:${stateColor(o.state)}"></span><b>${escapeHtml(o.state)}</b></td><td>${o.sticky?'<span class="pill sent">Onward</span>':'<span class="pill draft">One day</span>'}</td><td class="help">${escapeHtml(o.note||'')}</td><td><button class="del" style="color:var(--red);font-size:17px" onclick="clearOverride('${o.date}')" title="Remove this mark">×</button></td></tr>`).join('')}</tbody></table></div>
   </div>`:'';
 
   return banner+toolbar+kpis+summary+calendar+tripPanel+ovrPanel;
@@ -716,7 +749,7 @@ function calendarHtml(year,days){
       if(v.src==='override')cls.push('ovr');
       if(!v.state)cls.push('none');
       if(iso>today)cls.push('future');
-      const src=v.src==='override'?' (override)':v.src==='trip'?' (trip)':'';
+      const src=v.src==='override'?' (marked)':v.src==='trip'?' (trip)':v.src==='carry'?' (carried forward)':'';
       cells+=`<div class="${cls.join(' ')}" style="background:${stateColor(v.state)}" title="${escapeHtml(fmtDate(iso)+' · '+stateLabel(v.state)+src)}" onclick="openOverride('${iso}')">${d}</div>`;
     }
     out+=`<div class="cal-m"><div class="cal-t">${MN[m]}</div><div class="cal-g">${cells}</div></div>`;
@@ -770,30 +803,44 @@ async function delTrip(id){
 function openOverride(iso){
   const cur=dayMap(+iso.slice(0,4)).get(iso)||{state:'',src:'none'};
   const existing=(store.overrides||[]).find(o=>o.date===iso)||null;
-  const src=cur.src==='trip'?'a logged trip':cur.src==='home'?'your home state':cur.src==='override'?'a manual override':'nothing yet';
+  const src=cur.src==='trip'?'a logged trip'
+    :cur.src==='home'?'your home state'
+    :cur.src==='override'?'a day you marked'
+    :cur.src==='carry'?`the ${escapeHtml(shortDate(cur.markDate||''))} mark, carried forward`
+    :'nothing set yet';
+  const sticky=existing?!!existing.sticky:true;
   const ov=document.createElement('div');ov.className='overlay';ov.id='modalOverlay2';ov.style.zIndex=110;ov.onclick=e=>{if(e.target===ov)ov.remove();};
   ov.innerHTML=`<div class="modal" style="max-width:460px">
     <div class="modal-h"><h2>${escapeHtml(fmtDate(iso))}</h2><button class="x" onclick="this.closest('.overlay').remove()">×</button></div>
     <div class="modal-b">
       <p class="help" style="margin-bottom:16px">Currently <b style="color:var(--ink)">${escapeHtml(stateLabel(cur.state))}</b>, from ${src}.</p>
       <div class="form-grid">
-        <label class="fld full"><span>Override this day to</span><select id="ovState">${stateOptions(existing?existing.state:cur.state)}</select></label>
+        <label class="fld full"><span>I was in</span><select id="ovState">${stateOptions(existing?existing.state:cur.state)}</select></label>
+        <div class="fld full"><span>Applies to</span>
+          <div class="seg" id="ovScope" style="display:flex">
+            <button type="button" class="${sticky?'active':''}" data-v="1" onclick="pickScope(this)" style="flex:1">This day onward</button>
+            <button type="button" class="${sticky?'':'active'}" data-v="0" onclick="pickScope(this)" style="flex:1">Just this day</button>
+          </div>
+          <p class="help" style="margin-top:7px">Onward keeps this state until the next day you mark. Logged trips still take over their own dates and hand it back afterwards.</p>
+        </div>
         <label class="fld full"><span>Note (optional)</span><input id="ovNote" value="${escapeHtml(existing?existing.note:'')}" placeholder="e.g. flew home mid-day" /></label>
       </div>
     </div>
-    <div class="modal-f"><span>${existing?`<button class="btn danger sm" onclick="clearOverride('${iso}')">Remove override</button>`:''}</span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="saveOverride('${iso}')">Save day</button></div></div>
+    <div class="modal-f"><span>${existing?`<button class="btn danger sm" onclick="clearOverride('${iso}')">Remove mark</button>`:''}</span><div class="inline"><button class="btn ghost" onclick="this.closest('.overlay').remove()">Cancel</button><button class="btn" onclick="saveOverride('${iso}')">Save day</button></div></div>
   </div>`;
   document.body.appendChild(ov);
 }
+function pickScope(b){for(const x of b.parentElement.children)x.classList.remove('active');b.classList.add('active');}
 async function saveOverride(iso){
   const st=$('#ovState').value;
   if(!st){toast('Pick a state','warn');return;}
+  const sticky=$('#ovScope .active')?.dataset.v==='1';
   const existing=(store.overrides||[]).find(o=>o.date===iso);
-  const o={id:existing?existing.id:uid(),date:iso,state:st,note:$('#ovNote').value||''};
+  const o={id:existing?existing.id:uid(),date:iso,state:st,note:$('#ovNote').value||'',sticky};
   try{await dbUpsertOverride(o);}catch(e){toast('Save failed: '+e.message,'err');return;}
   store.overrides=(store.overrides||[]).filter(x=>x.date!==iso).concat([o]);
   const o2=$('#modalOverlay2');if(o2)o2.remove();
-  render();toast('Day saved');
+  render();toast(sticky?st+' from '+shortDate(iso)+' onward':'Day saved');
 }
 async function clearOverride(iso){
   const existing=(store.overrides||[]).find(o=>o.date===iso);
@@ -805,14 +852,15 @@ async function clearOverride(iso){
 }
 
 function exportStatesCSV(){
-  const {days,travelDays}=presence(stateYear), home=store.settings.homeState||'';
-  const lines=[['Date','Weekday','State code','State','Source','Detail','Also present in'].map(csvCell).join(',')];
+  const {days,travelDays,cutoff}=presence(stateYear), home=store.settings.homeState||'';
+  const lines=[['Date','Weekday','State code','State','Source','Detail','Also present in','Counted'].map(csvCell).join(',')];
   Array.from(days.keys()).sort().forEach(d=>{
     const v=days.get(d);
     let detail='';
     if(v.src==='trip'){const t=(store.trips||[]).find(x=>x.id===v.tripId);detail=t?(t.purpose||''):'';}
     if(v.src==='override')detail=v.note||'';
-    lines.push([d,parseISO(d).toLocaleDateString('en-US',{weekday:'short'}),v.state||'',v.state?stateLabel(v.state):'',v.src,detail,travelDays.has(d)?home:''].map(csvCell).join(','));
+    if(v.src==='carry'){const m=(store.overrides||[]).find(x=>x.date===v.markDate);detail='carried from '+(v.markDate||'')+(m&&m.note?' — '+m.note:'');}
+    lines.push([d,parseISO(d).toLocaleDateString('en-US',{weekday:'short'}),v.state||'',v.state?stateLabel(v.state):'',v.src,detail,travelDays.has(d)?home:'',(cutoff!==null&&d<=cutoff)?'yes':'not yet'].map(csvCell).join(','));
   });
   download(`state-presence-${stateYear}.csv`,lines.join('\n'),'text/csv');
   toast('CSV downloaded');

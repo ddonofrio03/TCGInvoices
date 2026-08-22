@@ -79,8 +79,11 @@ create table if not exists location_overrides (
   date        date not null unique,
   state       text not null,
   note        text default '',
+  -- true = this state carries forward until the next marked day; false = this single day only
+  sticky      boolean not null default false,
   created_at  timestamptz default now()
 );
+alter table location_overrides add column if not exists sticky boolean not null default false;
 
 create index if not exists location_trips_start_date_idx on location_trips(start_date);
 create index if not exists location_overrides_date_idx   on location_overrides(date);
