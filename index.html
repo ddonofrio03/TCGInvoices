@@ -188,9 +188,10 @@
 
 <script>
 /* ===== Supabase wiring ===== */
-const SUPABASE_URL='https://kjltyavevgacqhahejdc.supabase.co';
-const SUPABASE_KEY='sb_publishable_CsASjkFGBRyo9ZzPBqRQhg_5NOrd3X5';
-const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+/* Shared "TCG-DMD Overall" project; invoice tables live in the tcg_invoices schema. */
+const SUPABASE_URL='https://utucjtnhdkewcgyvgvsj.supabase.co';
+const SUPABASE_KEY='sb_publishable_4OrSCnTMRaXai768QwAqeQ_U7w7CPuT';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{db:{schema:'tcg_invoices'}});
 
 let store=null, view='dashboard', editingInvoice=null, editingClient=null, importState=null;
 
